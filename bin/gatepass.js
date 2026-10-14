@@ -71,11 +71,11 @@ async function init() {
   }
 
   saveConfig(config, configPath);
-  log(`\n[1/4] 配置已保存: ${configPath}`);
+  log(`\n[1/5] 配置已保存: ${configPath}`);
 
   // 端口检测
   const p443 = await checkPortFree(config.proxy.port, config.proxy.host);
-  log(`[2/4] 端口 ${config.proxy.port}: ${p443.free ? '可用' : '被占用（' + (p443.error || '') + '）'}`);
+  log(`[2/5] 端口 ${config.proxy.port}: ${p443.free ? '可用' : '被占用（' + (p443.error || '') + '）'}`);
   const pCons = await checkPortFree(config.console.port, config.console.host);
   log(`      控制台 ${config.console.port}: ${pCons.free ? '可用' : '被占用'}`);
 
@@ -88,14 +88,14 @@ async function init() {
     certDir,
     force: false,
   });
-  log(`[3/4] 证书: ${certs.certPath}`);
+  log(`[3/5] 证书: ${certs.certPath}`);
   const trust = trustCaCommand(certs.caPath);
   log(`      导入 CA（${trust.note}）:`);
   log(`      ${trust.command} ${trust.args.join(' ')}`);
 
   // hosts
   const entries = config.routes.filter((r) => r.enabled !== false).map((r) => ({ ip: '127.0.0.1', host: r.host, comment: 'gatepass' }));
-  log('[4/4] hosts:');
+  log('[4/5] hosts:');
   if (entries.length === 0) {
     log('      （无路由，跳过）');
   } else {
@@ -117,6 +117,18 @@ async function init() {
         log(`      ${cmd2.command} ${cmd2.args.join(' ')}`);
       }
     }
+  }
+
+  // 默认安装开机自启，免得二次开机找不到入口
+  log('[5/5] 开机自启:');
+  try {
+    const { installAutostart } = await import('../src/system/autostart.js');
+    const ar = await installAutostart();
+    log(`      已安装: ${ar.path}`);
+    log('      （可在控制台「设置 → 开机自启」随时关闭）');
+  } catch (e) {
+    log(`      安装失败: ${e.message}`);
+    log('      也可稍后在控制台「设置」一键安装');
   }
 
   rl.close();

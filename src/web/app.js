@@ -278,8 +278,8 @@ async function loadAutostart() {
   try {
     const s = await api('/api/autostart');
     $('#autostart-hint').textContent = s.installed
-      ? `已安装（${s.paths.dir}）`
-      : '尚未安装开机自启。点击「安装开机自启」后，每次开机自动运行代理。';
+      ? `已启用开机自启（${s.paths.dir}）。下次开机会自动运行代理。`
+      : '当前未启用开机自启。init 默认已装，如被移除可点「安装开机自启」。';
   } catch (e) {
     $('#autostart-hint').textContent = '查询失败: ' + e.message;
   }

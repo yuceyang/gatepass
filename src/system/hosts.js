@@ -17,9 +17,11 @@ export function hostsPath() {
 }
 
 function renderBlock(entries) {
-  const lines = [BEGIN, '# managed by gatepass — do not edit between markers'];
+  const lines = [BEGIN, '# managed by gatepass - do not edit between markers'];
   for (const e of entries) {
-    lines.push(`${e.ip}\t${e.host}${e.comment ? `\t# ${e.comment}` : ''}`);
+    // 注释必须纯 ASCII：Windows hosts 解析器对非 ASCII 易出错，会破坏整行
+    const comment = String(e.comment || 'gatepass').replace(/[^\x20-\x7E]/g, '').trim() || 'gatepass';
+    lines.push(`${e.ip}\t${e.host}\t# ${comment}`);
   }
   lines.push(END);
   return lines.join('\n');
