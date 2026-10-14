@@ -42,7 +42,9 @@ export class RouteRegistry {
       id: input.id || crypto.randomUUID(),
       host,
       upstreamHost: input.upstreamHost || host,
+      // upstreamPort：网关后的应用端口（dockerToken 用）；TCP 上游端口见 upstreamConnectPort（默认 443）
       upstreamPort,
+      upstreamConnectPort: input.upstreamConnectPort || '',
       providerId: input.providerId || 'ugos',
       enabled: input.enabled !== false,
       note: input.note || '',

@@ -110,7 +110,8 @@ test('engine: 转发 + 鉴权注入 + 302 重登重试', async () => {
   routes.add({
     host: 'app-5006-yuceyang.cn68.ugdocker.link',
     upstreamHost: '127.0.0.1',
-    upstreamPort: String(upPort),
+    upstreamPort: '5006',
+    upstreamConnectPort: String(upPort),
   });
 
   const engine = new Engine({
@@ -153,7 +154,7 @@ test('engine: 未匹配主机返回 421；OPTIONS 预检 204', async () => {
   const r1 = await requestVia('unknown.example.com', port, '/');
   assert.equal(r1.status, 421);
 
-  routes.add({ host: 'app-1.example.local', upstreamHost: '127.0.0.1', upstreamPort: '1' });
+  routes.add({ host: 'app-1.example.local', upstreamHost: '127.0.0.1', upstreamPort: '1', upstreamConnectPort: '1' });
   const r2 = await requestVia('app-1.example.local', port, '/', { method: 'OPTIONS' });
   assert.equal(r2.status, 204);
   assert.equal(r2.headers['access-control-allow-origin'], '*');

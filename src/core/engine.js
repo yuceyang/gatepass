@@ -134,7 +134,8 @@ export class Engine {
   async forward(req, res, route, allowRetry, t0) {
     const hostname = route.host;
     const realIp = await this.resolveUpstream(route.upstreamHost || hostname);
-    const upstreamPort = Number(route.upstreamPort || 443);
+    // upstreamPort 是网关后的应用端口（用于 dockerToken 等），TCP 上游默认连网关 443
+    const upstreamConnectPort = Number(route.upstreamConnectPort || 443);
 
     // Provider 注入鉴权（可能带 query token）
     const injected = await this.provider.applyToRequest(
@@ -148,7 +149,7 @@ export class Engine {
 
     const opts = {
       hostname: realIp,
-      port: upstreamPort,
+      port: upstreamConnectPort,
       method: req.method,
       path: injected.path || req.url,
       headers,
@@ -227,7 +228,7 @@ export class Engine {
       const upstream = tls.connect(
         {
           host: realIp,
-          port: Number(route.upstreamPort || 443),
+          port: Number(route.upstreamConnectPort || 443),
           servername: route.upstreamHost || hostname,
           rejectUnauthorized: !this.insecureUpstreamTls,
           agent: this.upstreamAgent,

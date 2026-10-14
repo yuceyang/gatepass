@@ -19,6 +19,8 @@ const HELP = `GatePass — 免重复登录的网关反向代理
   gatepass sync-hosts       按当前路由同步系统 hosts
   gatepass print-hosts      打印待写入的 hosts 块
   gatepass trust-ca         打印/尝试导入 CA 证书
+  gatepass install-autostart   安装开机自启
+  gatepass remove-autostart    移除开机自启
   gatepass help             显示本帮助
 
 环境变量:
@@ -191,6 +193,18 @@ async function main() {
     case 'trust-ca':
       cmdTrustCa();
       break;
+    case 'install-autostart': {
+      const mod = await import('../src/system/autostart.js');
+      const r = await mod.installAutostart();
+      log('开机自启已安装:', r.path);
+      break;
+    }
+    case 'remove-autostart': {
+      const mod = await import('../src/system/autostart.js');
+      const r = await mod.removeAutostart();
+      log(r.removed ? '开机自启已移除' : '未安装开机自启', r.path);
+      break;
+    }
     case 'help':
     case '--help':
     case '-h':

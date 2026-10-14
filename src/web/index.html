@@ -107,10 +107,24 @@
         <h2>系统集成</h2>
         <div class="actions">
           <button id="btn-sync-hosts">同步 hosts</button>
+          <button id="btn-sync-hosts-admin" class="primary">以管理员同步 hosts</button>
           <a class="btn" href="/api/ca" download="gatepass-ca.crt">下载 CA 证书</a>
         </div>
         <pre id="hosts-block" class="code"></pre>
-        <p class="hint">导入 CA 后需重启浏览器；hosts 需要管理员权限，失败时把上方内容手动追加到系统 hosts。</p>
+        <p class="hint" id="hosts-hint">
+          写系统 hosts 需要管理员权限。点「以管理员同步 hosts」会弹出 UAC，确认后自动写入；
+          若失败，请手动把上方内容追加到 <code>C:\Windows\System32\drivers\etc\hosts</code>（Windows）或 <code>/etc/hosts</code>（macOS/Linux）。
+          导入 CA 后需重启浏览器。
+        </p>
+      </div>
+
+      <div class="panel">
+        <h2>开机自启</h2>
+        <div class="actions">
+          <button id="btn-autostart-on" class="primary">安装开机自启</button>
+          <button id="btn-autostart-off">移除开机自启</button>
+        </div>
+        <p class="hint" id="autostart-hint">开机后自动启动代理，无需手动运行。</p>
       </div>
     </section>
   </main>

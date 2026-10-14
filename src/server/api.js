@@ -50,7 +50,14 @@ export class LiveLog {
 
   attach(socket) {
     this.sockets.add(socket);
-    socket.send(JSON.stringify({ type: 'hello', count: this.buf.length }));
+    // 延后发 hello，确保客户端已挂好 data 监听
+    setImmediate(() => {
+      try {
+        socket.send(JSON.stringify({ type: 'hello', count: this.buf.length }));
+      } catch {
+        /* socket gone */
+      }
+    });
   }
 
   detach(socket) {
@@ -246,6 +253,33 @@ export function createConsoleServer(deps) {
         await hostsMod.flushDns();
         return json(res, 200, result);
       }
+      if (p === '/api/hosts/sync-elevated' && req.method === 'POST') {
+        const hostsMod = await import('../system/hosts.js');
+        const autostartMod = await import('../system/autostart.js');
+        const entries = routes.hostsEntries();
+        const cmd = hostsMod.elevatedWriteCommand(entries);
+        const blockText = cmd.args.join(' ');
+        const wrap = await autostartMod.tryElevatedHostsWrite(blockText.match(/# gatepass begin[\s\S]*?# gatepass end/)?.[0] || '');
+        if (wrap.ok && process.platform === 'win32') {
+          autostartMod.launchElevatedHostsScript(wrap.script);
+        }
+        return json(res, 200, { ...wrap, manualCommand: `${cmd.command} ${cmd.args.join(' ')}`, manualNote: cmd.note });
+      }
+
+      if (p === '/api/autostart' && req.method === 'GET') {
+        const mod = await import('../system/autostart.js');
+        return json(res, 200, {
+          installed: mod.isAutostartInstalled(),
+          paths: mod.autostartPaths(),
+          platform: process.platform,
+        });
+      }
+      if (p === '/api/autostart' && req.method === 'POST') {
+        const mod = await import('../system/autostart.js');
+        const body = await readJson(req);
+        const r = body.action === 'remove' ? await mod.removeAutostart() : await mod.installAutostart();
+        return json(res, 200, r);
+      }
 
       if (p === '/api/ca' && req.method === 'GET') {
         // 提供 CA 下载
@@ -289,7 +323,8 @@ async function testRoute(route, provider) {
         {
           host: ip,
           servername: route.upstreamHost || route.host,
-          port: Number(route.upstreamPort || 443),
+          // TCP 上游连网关 443；upstreamPort 是网关后的应用端口
+          port: Number(route.upstreamConnectPort || 443),
           path: '/',
           method: 'GET',
           rejectUnauthorized: false,

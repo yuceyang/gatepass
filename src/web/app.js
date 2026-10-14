@@ -213,6 +213,7 @@ async function loadSettings() {
   f.domainSuffix.value = s.provider?.domainSuffix || '';
   const hosts = await api('/api/hosts');
   $('#hosts-block').textContent = hosts.block || '(尚未同步)';
+  loadAutostart();
 }
 
 $('#settings-form').addEventListener('submit', async (e) => {
@@ -238,15 +239,67 @@ $('#btn-sync-hosts').addEventListener('click', async () => {
     const r = await api('/api/hosts/sync', { method: 'POST' });
     $('#hosts-block').textContent = r.content?.match(/# gatepass begin[\s\S]*?# gatepass end/)?.[0] || '已同步';
     alert(r.changed ? 'hosts 已更新' : 'hosts 无变化');
+    loadSettings();
   } catch (err) {
     alert(err.message);
   }
 });
 
-// ---------- WebSocket ----------
+$('#btn-sync-hosts-admin').addEventListener('click', async () => {
+  try {
+    const r = await api('/api/hosts/sync-elevated', { method: 'POST' });
+    if (r.ok) {
+      alert(r.note || '已请求管理员权限，请在弹出的 UAC 对话框点“是”');
+    } else {
+      const cmd = r.manualCommand || '';
+      prompt('自动提权失败，请复制以下命令，用管理员 PowerShell 执行：', cmd);
+    }
+    setTimeout(loadSettings, 2000);
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+async function loadAutostart() {
+  try {
+    const s = await api('/api/autostart');
+    $('#autostart-hint').textContent = s.installed
+      ? `已安装（${s.paths.dir}）`
+      : '尚未安装开机自启。点击「安装开机自启」后，每次开机自动运行代理。';
+  } catch (e) {
+    $('#autostart-hint').textContent = '查询失败: ' + e.message;
+  }
+}
+
+$('#btn-autostart-on').addEventListener('click', async () => {
+  try {
+    await api('/api/autostart', { method: 'POST', body: JSON.stringify({ action: 'install' }) });
+    alert('已安装开机自启');
+    loadAutostart();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+$('#btn-autostart-off').addEventListener('click', async () => {
+  try {
+    await api('/api/autostart', { method: 'POST', body: JSON.stringify({ action: 'remove' }) });
+    alert('已移除开机自启');
+    loadAutostart();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+// ---------- WebSocket（带轮询兜底） ----------
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  try {
+    ws = new WebSocket(`${proto}://${location.host}/ws`);
+  } catch (e) {
+    setTimeout(connectWs, 3000);
+    return;
+  }
   ws.onopen = () => {
     $('#conn').textContent = '● 已连接';
     $('#conn').className = 'conn on';
@@ -265,6 +318,16 @@ function connectWs() {
   };
 }
 
+/** WS 不可用时轮询兜底；页面加载也先拉一次历史 */
+async function loadLogsOnce() {
+  try {
+    const list = await api('/api/logs?limit=200');
+    for (const e of list) {
+      if (!logBuffer.some((x) => x.ts === e.ts && x.path === e.path)) pushLog(e);
+    }
+  } catch {}
+}
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -272,5 +335,10 @@ function esc(s) {
 // ---------- 启动 ----------
 loadStatus();
 loadRoutes();
+loadLogsOnce();
 connectWs();
 setInterval(loadStatus, 5000);
+// WS 未连通时静默轮询日志
+setInterval(() => {
+  if (!ws || ws.readyState !== 1) loadLogsOnce();
+}, 3000);
