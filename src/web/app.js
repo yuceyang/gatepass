@@ -175,8 +175,9 @@ function pushLog(e) {
   row.innerHTML = logRow(e);
   const tr = row.firstElementChild;
   if (!f || (e.host + e.path).toLowerCase().includes(f)) {
-    tb.appendChild(tr);
-    while (tb.children.length > 500) tb.removeChild(tb.firstChild);
+    // 最新在最上面
+    tb.prepend(tr);
+    while (tb.children.length > 500) tb.removeChild(tb.lastChild);
   }
   const recent = $('#recent-logs');
   const div = document.createElement('div');
@@ -195,9 +196,11 @@ $('#btn-clear-logs').addEventListener('click', async () => {
 $('#log-filter').addEventListener('input', () => {
   const f = $('#log-filter').value.trim().toLowerCase();
   const tb = $('#log-table tbody');
+  // 倒序：最新在最上面
   tb.innerHTML = logBuffer
     .filter((e) => !f || (e.host + e.path).toLowerCase().includes(f))
     .slice(-500)
+    .reverse()
     .map((e) => logRow(e))
     .join('');
 });
@@ -322,6 +325,7 @@ function connectWs() {
 async function loadLogsOnce() {
   try {
     const list = await api('/api/logs?limit=200');
+    // 历史按时间正序返回，pushLog 逐条 prepend，最终展示为最新在上
     for (const e of list) {
       if (!logBuffer.some((x) => x.ts === e.ts && x.path === e.path)) pushLog(e);
     }
