@@ -1,36 +1,36 @@
 # GatePass
 
-**绿联私有云 NAS 全局免登录代理** —— 提前完成身份鉴别，让应用访问不再跳转绿联官方认证页。
+**私有云 NAS 全局免登录代理** —— 提前完成身份鉴别，让应用访问不再跳转官方认证页。
 
 ## 背景
 
-绿联私有云 NAS（UGOS）把 Docker 应用放在官方全局代理之后（`app-<端口>-<用户>.<域名>` 这类地址）。
-直接访问时，请求会被拦截并跳转到绿联的官方登录页（`…/desktop/#/login/account`）完成身份认证，
-登录一次之后，浏览器扩展（如书签同步 Floccus）、命令行工具、其它程序仍然拿不到会话，各自还要再登录一次。
+部分私有云 NAS（如绿联 UGOS）把 Docker 应用放在官方全局代理之后，地址形如
+`app-<端口>-<用户>.<域名>`。直接访问时，请求会被拦截并跳转到官方登录页完成身份认证；
+登录一次之后，浏览器扩展、命令行工具、其它程序仍然拿不到会话，各自还要再登录一次。
 
 GatePass 的做法是：**在本机提前完成身份鉴别**（登录 NAS、换取网关令牌、注入 Cookie/Header），
-对后端应用而言请求已经是「已认证」的，用户只需要关心真实服务/业务的访问，不再被绿联官方认证打断。
+对后端应用而言请求已经是「已认证」的，用户只需要关心真实服务/业务的访问，不再被官方认证打断。
 
 ## 原理
 
 ```
 浏览器 / 扩展 / 命令行
-        │  请求 https://app-xxxx-yuceyang.cn68.ugdocker.link/…
+        │  请求 https://app-xxxx-<域名>/…
         ▼
    GatePass（本机反向代理）          ── hosts 把域名指到 127.0.0.1
         │  ① 自动登录 NAS（账号密码 RSA 加密）
-        │  ② 换取网关 ugreen-proxy-token
-        │  ③ 注入 Cookie / X-Ugreen-Token / HTTP Basic
+        │  ② 换取网关一次性令牌
+        │  ③ 注入 Cookie / Token / HTTP Basic
         ▼
-   绿联官方全局代理网关（鉴权已带）──► 后端应用（不再跳转登录页）
+   官方全局代理网关（鉴权已带）──► 后端应用（不再跳转登录页）
 ```
 
-三层鉴别信息（对应绿联 UGOS 的认证体系）：
+三层鉴别信息：
 
 | 层 | 手段 | 用途 |
 |----|------|------|
 | NAS 会话 | `verify/check`（RSA 公钥）→ `verify/login` | 账号密码换 token |
-| 网关令牌 | `gateway/proxy/dockerToken` → `ugreen-proxy-token` | 通过官方全局代理 |
+| 网关令牌 | `gateway/proxy/dockerToken` → 一次性 Cookie | 通过官方全局代理 |
 | 应用鉴权 | HTTP Basic（部分应用要求） | 进入具体服务 |
 
 ## 特性
@@ -51,7 +51,7 @@ GatePass 的做法是：**在本机提前完成身份鉴别**（登录 NAS、换
 | 项 | 要求 |
 |----|------|
 | Node.js | ≥ 18（推荐 20 LTS） |
-| 权限 | 写系统 hosts 需管理员；程序会自动弹 UAC |
+| 权限 | 写系统 hosts、绑定 443 需管理员；程序会自动弹 UAC |
 | 浏览器 | Chrome / Edge / Firefox（需导入 CA 证书） |
 
 ```bash
@@ -68,7 +68,7 @@ npm install -g .        # 全局安装，提供 gatepass 命令
 gatepass help
 ```
 
-或直接源码运行（不装全局）：
+或直接源码运行：
 
 ```bash
 npm install && npm start
@@ -86,11 +86,11 @@ gatepass init
 
 按提示填：
 
-1. NAS 登录地址（如 `https://xxx.cn68.ug.link`）
+1. NAS 登录地址
 2. 用户名 / 密码
-3. 代理域名后缀（如 `yuceyang.cn68.ugdocker.link`）
+3. 代理域名后缀（应用地址的公共后缀）
 4. 首个路由主机名（可留空，稍后在控制台添加）
-5. 端口（默认代理 443、控制台 9099）
+5. 端口（代理默认 443，控制台默认 19099）
 
 完成后会**自动安装开机自启**（可在控制台关闭）。
 
@@ -132,8 +132,7 @@ sudo cp ~/.config/gatepass/certs/ca.crt /usr/local/share/ca-certificates/gatepas
 sudo update-ca-certificates
 ```
 
-导入后**完全退出浏览器再打开**（扩展进程才会读到新证书）。
-也可在控制台「设置 → 下载 CA 证书」双击导入。
+导入后**完全退出浏览器再打开**。也可在控制台「设置 → 下载 CA 证书」双击导入。
 
 ### 3. 启动
 
@@ -141,28 +140,32 @@ sudo update-ca-certificates
 gatepass start
 ```
 
-非管理员时会自动弹 UAC 提权（点「是」即可）。开机自启已装的话无需手动运行。
-
-访问应用（无端号，标准 HTTPS）：
-
-```
-https://app-5006-yuceyang.cn68.ugdocker.link/
-```
+非管理员时会自动弹 UAC 提权（点「是」即可）。开机自启已装则无需手动运行。
 
 ### 4. 浏览器使用
 
-1. 打开控制台 **http://127.0.0.1:9099**
-2. 「路由」页添加应用主机名（端口自动从 `app-5006-…` 推断）
+1. 打开控制台 `http://127.0.0.1:19099`
+2. 「路由」页添加应用主机名（端口自动从 `app-<端口>-…` 推断）
 3. 直接访问应用，例如：
 
 ```
-https://app-5006-yuceyang.cn68.ugdocker.link/
-https://app-9090-yuceyang.cn68.ugdocker.link/ui/
+https://app-8080-<你的域名>/
+https://app-9000-<你的域名>/admin/
 ```
 
-不会再跳绿联登录页。
+不会再跳官方登录页。
 
 ---
+
+## 端口说明
+
+| 用途 | 默认端口 | 说明 |
+|------|----------|------|
+| 代理 | **443** | 浏览器/扩展默认走标准 HTTPS 端口 |
+| 控制台 | **19099** | Web 管理界面（可改配置） |
+
+> 443 是 HTTPS 标准端口，各类客户端默认走它。绑定 443 需要管理员权限，
+> 程序启动时自动请求 UAC。若 443 已被其它 Web 服务占用，请先停用或换机器。
 
 ## 控制台
 
@@ -170,7 +173,7 @@ https://app-9090-yuceyang.cn68.ugdocker.link/ui/
 |------|------|
 | **总览** | 代理监听、会话状态、路由数、请求/错误统计、最近请求（自动刷新） |
 | **路由** | 添加/编辑/删除/启停/测试连通；状态码 200–499 均表示**代理已生效**（401/404 是应用自身响应） |
-| **实时日志** | 每条请求的方法/主机/路径/状态码/耗时，最新在最上，2 秒自动刷新 |
+| **实时日志** | 每条请求的方法/主机/路径/状态码/耗时，最新在最上，自动刷新 |
 | **设置** | 账号密码（脱敏）、hosts 同步（自动 UAC）、CA 下载、开机自启开关 |
 
 ## 命令
@@ -202,9 +205,9 @@ gatepass help
   },
   "routes": [
     {
-      "host": "app-5006-your.domain.example",
-      "upstreamPort": "5006",          // 网关后的应用端口（换 token 用）
-      "upstreamConnectPort": "443",    // TCP 上游端口（绿联网关是 443，这里只是目标，不是监听）
+      "host": "app-8080-your.domain.example",
+      "upstreamPort": "8080",          // 网关后的应用端口（换 token 用）
+      "upstreamConnectPort": "443",    // TCP 上游端口（网关是 443，只是目标，不是监听）
       "providerId": "ugos",
       "enabled": true
     }
@@ -218,24 +221,6 @@ gatepass help
 2. `npm install -g .`
 3. 新机器上 `gatepass trust-ca` 与 `gatepass sync-hosts`（各机一次）
 
-### 端口说明
-
-| 用途 | 默认端口 | 说明 |
-|------|----------|------|
-| 代理 | **443** | 浏览器/扩展默认走标准 HTTPS 端口，必须为 443 |
-| 控制台 | **19099** | Web 管理界面 |
-
-访问应用（无需带端号）：
-
-```
-https://app-5006-yuceyang.cn68.ugdocker.link/
-http://127.0.0.1:19099/          # 控制台
-```
-
-> 443 是 HTTPS 标准端口，浏览器扩展（如 Floccus）与书签都默认走它。
-> 绑定 443 需要管理员权限，程序启动时会自动请求 UAC。
-> 若 443 已被 IIS/nginx 等占用，请先停用那些服务或改用其它机器。
-
 ## 架构
 
 ```
@@ -244,7 +229,7 @@ src/
   index.js               启动编排、端口绑定失败自动提权
   core/
     provider.js          AuthProvider 契约
-    providers/ugos.js    绿联 UGOS 三段式鉴权 + generic-header
+    providers/ugos.js    NAS 三段式鉴权 + generic-header
     engine.js            HTTPS 反向代理（转发、WS、302 重登）
     routes.js            路由注册表（去端口/协议、端口推断）
   system/
@@ -253,6 +238,7 @@ src/
     certs.js             自签证书（SAN 覆盖连字符域名）
     elevate.js           UAC 提权 / 任务计划兜底
     autostart.js         开机自启
+    portproxy.js         可选 443 转发（非 443 监听时用）
   server/api.js          控制台 REST + 实时日志
   web/                   控制台前端（无构建）
 ```
@@ -261,7 +247,7 @@ src/
 
 `AuthProvider`：`ensureSession` / `applyToRequest` / `isAuthRedirect` / `renewGatewayToken`。
 
-- **ugos**：`verify/check`（RSA 公钥）→ `verify/login` → `gateway/proxy/dockerToken`（`ugreen-proxy-token`）+ HTTP Basic
+- **ugos**：`verify/check`（RSA 公钥）→ `verify/login` → `gateway/proxy/dockerToken` + HTTP Basic
 - **generic-header**：静态 Cookie/Header 注入
 
 ## 开发
