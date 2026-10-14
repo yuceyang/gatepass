@@ -52,6 +52,14 @@ export async function start(opts = {}) {
     await engine.listen(config.proxy.port, config.proxy.host);
   } catch (e) {
     if (e.code === 'EACCES' || e.code === 'EADDRINUSE') {
+      // 绑不上 443：自动请求管理员重启（用户只点一次 UAC）
+      const { isElevated, relaunchElevated } = await import('./system/elevate.js');
+      if (!isElevated() && process.platform === 'win32') {
+        log(`[gatepass] 端口 ${config.proxy.port} 需要管理员，正在请求提权…`);
+        const r = relaunchElevated();
+        log(`[gatepass] ${r.note}`);
+        return { relaunchedElevated: true, async close() {} };
+      }
       throw new Error(`代理端口 ${config.proxy.port} 无法监听（${e.code}）。请用管理员权限运行，或修改 config.proxy.port`);
     }
     throw e;
@@ -81,7 +89,7 @@ export async function start(opts = {}) {
     (e) => log(`[gatepass] 预登录失败: ${e.message}`)
   );
 
-  // 同步 hosts（失败仅提示）
+  // 同步 hosts（失败仅提示；未提权则自动请求 UAC）
   try {
     const entries = routes.hostsEntries();
     if (entries.length) {
@@ -90,8 +98,16 @@ export async function start(opts = {}) {
       log(`[gatepass] hosts ${r.changed ? '已更新' : '无变化'}（${entries.length} 条）`);
     }
   } catch (e) {
-    log(`[gatepass] hosts 写入失败（需管理员）: ${e.message}`);
-    log(`[gatepass] 可在控制台「设置 → 系统集成」查看待写入内容`);
+    log(`[gatepass] hosts 写入失败: ${e.message}`);
+    if (process.platform === 'win32') {
+      const { runElevatedPowerShell } = await import('./system/elevate.js');
+      const { elevatedWriteCommand } = await import('./system/hosts.js');
+      const cmdObj = elevatedWriteCommand(routes.hostsEntries());
+      const r2 = runElevatedPowerShell(cmdObj.args.join(' '));
+      log(`[gatepass] ${r2.note}`);
+    } else {
+      log(`[gatepass] 可在控制台「设置 → 系统集成」查看待写入内容`);
+    }
   }
 
   return {

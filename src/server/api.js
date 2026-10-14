@@ -364,19 +364,31 @@ async function testRoute(route, provider) {
   }
 }
 
-/** 路由变更后同步 hosts，失败只返回提示不抛错 */
+/** 路由变更后同步 hosts，未提权则自动弹 UAC */
 async function syncHostsAfterChange(routes) {
+  const entries = routes.hostsEntries();
+  if (!entries.length) return { hostsSynced: true, hostsChanged: false };
   try {
     const hostsMod = await import('../system/hosts.js');
-    const entries = routes.hostsEntries();
     const result = hostsMod.writeHostsBlock(entries);
     await hostsMod.flushDns().catch(() => {});
     return { hostsSynced: true, hostsChanged: result.changed, hostsPath: result.path };
-  } catch (e) {
+  } catch {
+    // 无权限：自动请求 UAC 写入，用户只点「是」
+    if (process.platform === 'win32') {
+      const { runElevatedPowerShell } = await import('../system/elevate.js');
+      const hostsMod = await import('../system/hosts.js');
+      const cmdObj = hostsMod.elevatedWriteCommand(entries);
+      const r = runElevatedPowerShell(cmdObj.args.join(' '));
+      return {
+        hostsSynced: false,
+        hostsElevating: true,
+        hostsHint: r.note + '。完成后刷新页面即可。',
+      };
+    }
     return {
       hostsSynced: false,
-      hostsError: e.message,
-      hostsHint: 'hosts 需管理员权限，请在「设置 → 系统集成」点「以管理员同步 hosts」',
+      hostsHint: 'hosts 需要管理员权限，请用 sudo 运行 gatepass sync-hosts',
     };
   }
 }

@@ -7,6 +7,7 @@ import { start } from '../src/index.js';
 import { ensureCerts } from '../src/system/certs.js';
 import { writeHostsBlock, flushDns, elevatedWriteCommand, readHostsBlock } from '../src/system/hosts.js';
 import { trustCaCommand, checkPortFree } from '../src/system/certtrust.js';
+import { isElevated, relaunchElevated } from '../src/system/elevate.js';
 
 const [, , cmd = 'help', ...rest] = process.argv;
 
@@ -104,9 +105,17 @@ async function init() {
       log(`      已写入 ${r.path}`);
     } catch (e) {
       log(`      写入失败: ${e.message}`);
-      const cmd2 = elevatedWriteCommand(entries);
-      log(`      请手动执行（${cmd2.note}）:`);
-      log(`      ${cmd2.command} ${cmd2.args.join(' ')}`);
+      if (process.platform === 'win32') {
+        const { runElevatedPowerShell } = await import('../src/system/elevate.js');
+        const { elevatedWriteCommand } = await import('../src/system/hosts.js');
+        const cmdObj = elevatedWriteCommand(entries);
+        const r2 = runElevatedPowerShell(cmdObj.args.join(' '));
+        log(`      ${r2.note}`);
+      } else {
+        const cmd2 = elevatedWriteCommand(entries);
+        log(`      请手动执行（${cmd2.note}）:`);
+        log(`      ${cmd2.command} ${cmd2.args.join(' ')}`);
+      }
     }
   }
 
@@ -137,6 +146,16 @@ async function cmdSyncHosts() {
   const entries = rr.hostsEntries();
   if (!entries.length) {
     log('无路由，跳过');
+    return;
+  }
+  if (!isElevated() && process.platform === 'win32') {
+    log('需要管理员权限写 hosts，正在请求提权…');
+    const { runElevatedPowerShell } = await import('../src/system/elevate.js');
+    const { elevatedWriteCommand } = await import('../src/system/hosts.js');
+    const cmdObj = elevatedWriteCommand(entries);
+    const r = runElevatedPowerShell(cmdObj.args.join(' '));
+    log(r.note);
+    log('稍后在控制台点「同步 hosts」或重新运行 gatepass sync-hosts 验证。');
     return;
   }
   try {
@@ -174,6 +193,16 @@ function cmdTrustCa() {
 }
 
 async function main() {
+  // start / sync-hosts / init 需要管理员（443 端口、写系统 hosts）。
+  // 未提权时自动以管理员重新拉起，用户只需点一次 UAC「是」。
+  const needsAdmin = cmd === 'start' || cmd === 'sync-hosts';
+  if (needsAdmin && !isElevated() && process.platform === 'win32') {
+    log('需要管理员权限，正在请求提权…');
+    const r = relaunchElevated();
+    log(r.note);
+    if (r.ok) return;
+  }
+
   switch (cmd) {
     case 'init':
       await init();

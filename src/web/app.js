@@ -147,11 +147,10 @@ $('#route-form').addEventListener('submit', async (e) => {
       saved = await api('/api/routes', { method: 'POST', body: JSON.stringify(body) });
     }
     $('#route-form-panel').classList.add('hidden');
-    if (saved && saved._hosts && saved._hosts.hostsSynced === false) {
-      alert('路由已保存，但 hosts 同步失败：' + (saved._hosts.hostsError || '') +
-        '\n\n请到「设置 → 系统集成」点「以管理员同步 hosts」，否则浏览器不会经过代理。');
-    } else if (saved && saved._hosts && saved._hosts.hostsSynced) {
-      // hosts 已自动同步
+    if (saved && saved._hosts && saved._hosts.hostsElevating) {
+      alert('路由已保存。\n\n' + (saved._hosts.hostsHint || '正在请求管理员权限写入 hosts，请在 UAC 弹窗点“是”。'));
+    } else if (saved && saved._hosts && saved._hosts.hostsSynced === false) {
+      alert('路由已保存，但 hosts 同步失败：' + (saved._hosts.hostsError || saved._hosts.hostsHint || ''));
     }
     loadRoutes();
   } catch (err) {

@@ -112,8 +112,8 @@
         </div>
         <pre id="hosts-block" class="code"></pre>
         <p class="hint" id="hosts-hint">
-          写系统 hosts 需要管理员权限。点「以管理员同步 hosts」会弹出 UAC，确认后自动写入；
-          若失败，请手动把上方内容追加到 <code>C:\Windows\System32\drivers\etc\hosts</code>（Windows）或 <code>/etc/hosts</code>（macOS/Linux）。
+          写系统 hosts 需要管理员权限。程序会自动请求 UAC 提权（点「是」即可）；
+          若未弹出，请把上方内容手动追加到 <code>C:\Windows\System32\drivers\etc\hosts</code>（Windows）或 <code>/etc/hosts</code>（macOS/Linux）。
           导入 CA 后需重启浏览器。
         </p>
       </div>
