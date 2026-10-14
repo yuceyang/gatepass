@@ -1,0 +1,356 @@
+import http from 'node:http';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WEB_ROOT = path.join(__dirname, '..', 'web');
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+};
+
+/**
+ * 环形缓冲 + WS 广播的实时请求日志。
+ */
+export class LiveLog {
+  constructor(size = 2000) {
+    this.size = size;
+    this.buf = [];
+    this.sockets = new Set();
+  }
+
+  push(evt) {
+    this.buf.push(evt);
+    if (this.buf.length > this.size) this.buf.splice(0, this.buf.length - this.size);
+    const data = JSON.stringify({ type: 'log', ...evt });
+    for (const ws of this.sockets) {
+      try {
+        ws.send(data);
+      } catch {
+        this.sockets.delete(ws);
+      }
+    }
+  }
+
+  recent(limit = 200) {
+    return this.buf.slice(-limit);
+  }
+
+  clear() {
+    this.buf = [];
+  }
+
+  attach(socket) {
+    this.sockets.add(socket);
+    socket.send(JSON.stringify({ type: 'hello', count: this.buf.length }));
+  }
+
+  detach(socket) {
+    this.sockets.delete(socket);
+  }
+}
+
+/** 极简 WebSocket（RFC6455 文本帧）服务端，足够控制台日志推送 */
+function attachWebSocketUpgrade(server, liveLog) {
+  server.on('upgrade', (req, socket) => {
+    if (!req.url.startsWith('/ws')) {
+      socket.destroy();
+      return;
+    }
+    const key = req.headers['sec-websocket-key'];
+    if (!key) {
+      socket.destroy();
+      return;
+    }
+    const accept = crypto
+      .createHash('sha1')
+      .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+      .digest('base64');
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+        'Upgrade: websocket\r\n' +
+        'Connection: Upgrade\r\n' +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`
+    );
+
+    const ws = makeWsWrapper(socket);
+    liveLog.attach(ws);
+    socket.on('close', () => liveLog.detach(ws));
+    socket.on('error', () => liveLog.detach(ws));
+    socket.on('data', (buf) => {
+      // 忽略客户端帧（含 ping/pong 关闭）；收到 close 则断开
+      if (buf.length > 1 && (buf[0] & 0x0f) === 0x8) socket.destroy();
+    });
+  });
+}
+
+function makeWsWrapper(socket) {
+  return {
+    send(text) {
+      const payload = Buffer.from(String(text), 'utf8');
+      let header;
+      if (payload.length < 126) {
+        header = Buffer.alloc(2);
+        header[0] = 0x81;
+        header[1] = payload.length;
+      } else if (payload.length < 65536) {
+        header = Buffer.alloc(4);
+        header[0] = 0x81;
+        header[1] = 126;
+        header.writeUInt16BE(payload.length, 2);
+      } else {
+        header = Buffer.alloc(10);
+        header[0] = 0x81;
+        header[1] = 127;
+        header.writeUInt32BE(0, 2);
+        header.writeUInt32BE(payload.length, 6);
+      }
+      try {
+        socket.write(Buffer.concat([header, payload]));
+      } catch {
+        /* socket gone */
+      }
+    },
+  };
+}
+
+/**
+ * 控制台 HTTP 服务：REST API + 静态前端 + WS 日志。
+ *
+ * @param {{
+ *   provider: any,
+ *   routes: any,
+ *   live: LiveLog,
+ *   config: object,
+ *   saveConfig: (cfg:object)=>void,
+ *   engine: any,
+ *   certs: {caPath:string, certPath:string},
+ *   log?: Function,
+ * }} deps
+ */
+export function createConsoleServer(deps) {
+  const { provider, routes, live, config, saveConfig, engine, certs, log = () => {} } = deps;
+
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    const p = url.pathname;
+
+    // CORS（本地控制台）
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    try {
+      if (p === '/api/status' && req.method === 'GET') {
+        return json(res, 200, {
+          engine: { ...engine?.stats, listening: !!engine?.httpsServer?.listening },
+          provider: provider.describe(),
+          routes: routes.list().length,
+          routesEnabled: routes.list().filter((r) => r.enabled).length,
+          liveBuffered: live.recent(100000).length,
+          console: config.console,
+          proxy: config.proxy,
+          onboardingDone: !!config.onboardingDone,
+        });
+      }
+
+      if (p === '/api/routes' && req.method === 'GET') {
+        return json(res, 200, routes.list());
+      }
+
+      if (p === '/api/routes' && req.method === 'POST') {
+        const body = await readJson(req);
+        const r = routes.add(body);
+        persistRoutes();
+        return json(res, 201, r);
+      }
+
+      const m = p.match(/^\/api\/routes\/([^/]+)$/);
+      if (m && req.method === 'GET') {
+        const r = routes.get(m[1]);
+        return r ? json(res, 200, r) : json(res, 404, { error: 'not found' });
+      }
+      if (m && (req.method === 'PUT' || req.method === 'PATCH')) {
+        const body = await readJson(req);
+        const r = routes.update(m[1], body);
+        persistRoutes();
+        return json(res, 200, r);
+      }
+      if (m && req.method === 'DELETE') {
+        const ok = routes.remove(m[1]);
+        persistRoutes();
+        return json(res, ok ? 200 : 404, { ok });
+      }
+
+      const m2 = p.match(/^\/api\/routes\/([^/]+)\/test$/);
+      if (m2 && req.method === 'POST') {
+        const r = routes.get(m2[1]);
+        if (!r) return json(res, 404, { error: 'not found' });
+        const result = await testRoute(r, provider);
+        return json(res, 200, result);
+      }
+
+      if (p === '/api/logs' && req.method === 'GET') {
+        const limit = Number(url.searchParams.get('limit') || 200);
+        return json(res, 200, live.recent(limit));
+      }
+      if (p === '/api/logs' && req.method === 'DELETE') {
+        live.clear();
+        return json(res, 200, { ok: true });
+      }
+
+      if (p === '/api/settings' && req.method === 'GET') {
+        return json(res, 200, {
+          provider: { ...config.provider, password: config.provider?.password ? '••••••' : '' },
+          proxy: config.proxy,
+          console: config.console,
+          onboardingDone: !!config.onboardingDone,
+        });
+      }
+      if (p === '/api/settings' && req.method === 'PUT') {
+        const body = await readJson(req);
+        if (body.provider) {
+          // 密码留空表示不改
+          if (body.provider.password === '••••••' || body.provider.password === undefined) {
+            delete body.provider.password;
+          }
+          Object.assign(config.provider, body.provider);
+        }
+        if (body.proxy) Object.assign(config.proxy, body.proxy);
+        if (body.onboardingDone !== undefined) config.onboardingDone = !!body.onboardingDone;
+        saveConfig(config);
+        return json(res, 200, { ok: true });
+      }
+
+      if (p === '/api/hosts' && req.method === 'GET') {
+        const hostsMod = await import('../system/hosts.js');
+        return json(res, 200, { block: hostsMod.readHostsBlock() });
+      }
+      if (p === '/api/hosts/sync' && req.method === 'POST') {
+        const hostsMod = await import('../system/hosts.js');
+        const entries = routes.hostsEntries();
+        const result = hostsMod.writeHostsBlock(entries);
+        await hostsMod.flushDns();
+        return json(res, 200, result);
+      }
+
+      if (p === '/api/ca' && req.method === 'GET') {
+        // 提供 CA 下载
+        const buf = fs.readFileSync(certs.caPath);
+        res.writeHead(200, {
+          'Content-Type': 'application/x-x509-ca-cert',
+          'Content-Disposition': 'attachment; filename="gatepass-ca.crt"',
+        });
+        res.end(buf);
+        return;
+      }
+
+      // 静态前端
+      return serveStatic(res, p);
+    } catch (e) {
+      log(`[console] ${req.method} ${p} 错误: ${e.message}`);
+      return json(res, 400, { error: e.message });
+    }
+  });
+
+  function persistRoutes() {
+    config.routes = routes.list();
+    saveConfig(config);
+  }
+
+  attachWebSocketUpgrade(server, live);
+  return server;
+}
+
+async function testRoute(route, provider) {
+  try {
+    await provider.ensureSession();
+    await provider.renewGatewayToken(route.host).catch(() => null);
+    const https = await import('node:https');
+    const dns = await import('node:dns/promises');
+    const addrs = await dns.resolve4(route.upstreamHost || route.host).catch(() => []);
+    const ip = addrs[0];
+    if (!ip) return { ok: false, error: 'DNS 解析失败' };
+    return await new Promise((resolve) => {
+      const req = https.request(
+        {
+          host: ip,
+          servername: route.upstreamHost || route.host,
+          port: Number(route.upstreamPort || 443),
+          path: '/',
+          method: 'GET',
+          rejectUnauthorized: false,
+          headers: { host: route.host },
+        },
+        (res) => {
+          res.resume();
+          resolve({ ok: res.statusCode < 400 || res.statusCode === 401, status: res.statusCode, location: res.headers.location || null });
+        }
+      );
+      req.on('error', (e) => resolve({ ok: false, error: e.message }));
+      req.setTimeout(8000, () => {
+        req.destroy();
+        resolve({ ok: false, error: 'timeout' });
+      });
+      req.end();
+    });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function json(res, status, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(body);
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      try {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve(text ? JSON.parse(text) : {});
+      } catch (e) {
+        reject(new Error('JSON 解析失败'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function serveStatic(res, p) {
+  let rel = p === '/' ? '/index.html' : p;
+  rel = rel.replace(/\.\./g, '');
+  const file = path.join(WEB_ROOT, rel);
+  if (!file.startsWith(WEB_ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    // SPA fallback
+    const idx = path.join(WEB_ROOT, 'index.html');
+    if (fs.existsSync(idx)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(fs.readFileSync(idx));
+      return;
+    }
+    res.writeHead(404);
+    res.end('not found');
+    return;
+  }
+  const ext = path.extname(file);
+  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+  res.end(fs.readFileSync(file));
+}

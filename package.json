@@ -1,0 +1,43 @@
+{
+  "name": "gatepass",
+  "version": "0.1.0",
+  "description": "Authenticated reverse proxy for gated app gateways — log in once, access everywhere",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "gatepass": "bin/gatepass.js"
+  },
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node bin/gatepass.js start",
+    "init": "node bin/gatepass.js init",
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "proxy",
+    "reverse-proxy",
+    "auth",
+    "sso",
+    "gateway",
+    "self-hosted",
+    "webdav",
+    "nas"
+  ],
+  "dependencies": {
+    "selfsigned": "^2.4.1"
+  }
+}

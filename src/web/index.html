@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GatePass 控制台</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">GatePass</div>
+    <nav>
+      <button data-page="overview" class="nav-btn active">总览</button>
+      <button data-page="routes" class="nav-btn">路由</button>
+      <button data-page="logs" class="nav-btn">实时日志</button>
+      <button data-page="settings" class="nav-btn">设置</button>
+    </nav>
+    <div id="conn" class="conn">● 连接中…</div>
+  </header>
+
+  <main>
+    <section id="page-overview" class="page active">
+      <div class="cards" id="status-cards"></div>
+      <div class="panel">
+        <h2>最近请求</h2>
+        <div id="recent-logs" class="log-list small"></div>
+      </div>
+    </section>
+
+    <section id="page-routes" class="page">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>路由</h2>
+          <button id="btn-add-route" class="primary">＋ 添加路由</button>
+        </div>
+        <table class="table" id="route-table">
+          <thead>
+            <tr>
+              <th>主机名</th><th>上游</th><th>Provider</th><th>启用</th><th>状态</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="panel hidden" id="route-form-panel">
+        <h2 id="route-form-title">添加路由</h2>
+        <form id="route-form" class="form">
+          <label>主机名 <input name="host" placeholder="app-5006-yuceyang.cn68.ugdocker.link" required /></label>
+          <label>上游端口 <input name="upstreamPort" placeholder="留空则从主机名推断（app-5006-… → 5006）" /></label>
+          <label>上游主机 <input name="upstreamHost" placeholder="默认与主机名相同" /></label>
+          <label>Provider
+            <select name="providerId">
+              <option value="ugos">ugos</option>
+              <option value="generic-header">generic-header</option>
+            </select>
+          </label>
+          <label>备注 <input name="note" /></label>
+          <label class="row"><input type="checkbox" name="enabled" checked /> 启用</label>
+          <div class="actions">
+            <button type="submit" class="primary">保存</button>
+            <button type="button" id="btn-cancel-route">取消</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section id="page-logs" class="page">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>实时日志</h2>
+          <div>
+            <input id="log-filter" placeholder="过滤路径/主机…" />
+            <button id="btn-clear-logs">清空</button>
+          </div>
+        </div>
+        <table class="table" id="log-table">
+          <thead>
+            <tr><th>时间</th><th>方法</th><th>主机</th><th>路径</th><th>状态</th><th>耗时</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="page-settings" class="page">
+      <div class="panel">
+        <h2>账号与鉴权</h2>
+        <form id="settings-form" class="form">
+          <label>Provider
+            <select name="providerId">
+              <option value="ugos">ugos</option>
+              <option value="generic-header">generic-header</option>
+            </select>
+          </label>
+          <label>NAS 地址 <input name="authBase" placeholder="https://xxx.cn68.ug.link" /></label>
+          <label>用户名 <input name="username" autocomplete="username" /></label>
+          <label>密码 <input name="password" type="password" autocomplete="current-password" placeholder="留空则不修改" /></label>
+          <label>域名后缀 <input name="domainSuffix" placeholder="yuceyang.cn68.ugdocker.link" /></label>
+          <div class="actions">
+            <button type="submit" class="primary">保存设置</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h2>系统集成</h2>
+        <div class="actions">
+          <button id="btn-sync-hosts">同步 hosts</button>
+          <a class="btn" href="/api/ca" download="gatepass-ca.crt">下载 CA 证书</a>
+        </div>
+        <pre id="hosts-block" class="code"></pre>
+        <p class="hint">导入 CA 后需重启浏览器；hosts 需要管理员权限，失败时把上方内容手动追加到系统 hosts。</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
