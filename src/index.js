@@ -99,30 +99,16 @@ export async function start(opts = {}) {
     (e) => log(`[gatepass] 预登录失败: ${e.message}`)
   );
 
-  // Windows：确保 443 → 代理端口 的系统转发存在，
-  // 这样 https://app-xxx…/ 不带端号也能走本代理（服务本身仍监听非常用端口）
+  // Windows：如配置了非 443 代理端口，可建立 443 转发（默认不启用，代理直接监听 443）
   if (process.platform === 'win32' && config.proxy.port !== 443) {
     try {
       const pp = await import('./system/portproxy.js');
       const st = await pp.getPortProxyStatus();
-      if (!st.installed) {
-        const r = await pp.installPortProxy(config.proxy.port);
-        if (r.ok) {
-          log(`[gatepass] 已建立 443 → ${config.proxy.port} 端口转发（${r.note}）`);
-        } else {
-          // 无权限：弹 UAC 让用户点一次
-          const { runElevatedPowerShell } = await import('./system/elevate.js');
-          const cmd = pp.portproxyCommand(config.proxy.port);
-          runElevatedPowerShell(
-            `& '${cmd.command}' ${cmd.args.map((a) => `'${a}'`).join(' ')}; netsh interface portproxy show all`
-          );
-          log(`[gatepass] ${r.note || '需要管理员'}：已请求 UAC 建立 443 → ${config.proxy.port} 转发，请点「是」`);
-        }
-      } else {
+      if (st.installed) {
         log(`[gatepass] 443 端口转发已存在，https://app-xxx…/ 可直接访问`);
       }
-    } catch (e) {
-      log(`[gatepass] 端口转发设置失败: ${e.message}；请用 https://app-xxx…:${config.proxy.port}/ 访问`);
+    } catch {
+      /* ignore */
     }
   }
 

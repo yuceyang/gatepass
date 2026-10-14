@@ -42,7 +42,7 @@ async function init() {
   const password = await ask('密码');
   const domainSuffix = await ask('代理域名后缀（如 yuceyang.cn68.ugdocker.link）');
   const routeHost = await ask('首个路由主机名（如 app-5006-yuceyang.cn68.ugdocker.link，可留空稍后在控制台添加）');
-  const proxyPort = await ask('代理端口（建议非常用端口，如 18443）', '18443');
+  const proxyPort = await ask('代理端口（默认 443，浏览器/扩展需标准 HTTPS 端口）', '443');
   const consolePort = await ask('控制台端口（建议非常用端口，如 19099）', '19099');
 
   const configPath = defaultConfigPath();
@@ -55,7 +55,7 @@ async function init() {
     password,
     domainSuffix,
   };
-  config.proxy = { ...config.proxy, port: Number(proxyPort) || 18443 };
+  config.proxy = { ...config.proxy, port: Number(proxyPort) || 443 };
   config.console = { ...config.console, port: Number(consolePort) || 19099 };
   // 常见端口提醒
   const { isCommonPort, commonPortWarning } = await import('../src/system/certtrust.js');
