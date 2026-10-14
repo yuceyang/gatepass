@@ -92,7 +92,13 @@ gatepass init
 4. 首个路由主机名（可留空，稍后在控制台添加）
 5. 端口（代理默认 443，控制台默认 19099）
 
-完成后会**自动安装开机自启**（可在控制台关闭）。
+完成后会**自动安装开机自启**（可在控制台关闭）。自启为**后台静默运行**，不弹命令行窗口：
+
+| 平台 | 实现 | 位置 |
+|------|------|------|
+| Windows | `gatepass-start.vbs`（WScript 隐藏启动） | 启动文件夹 |
+| macOS | `com.gatepass.agent.plist` | `~/Library/LaunchAgents/` |
+| Linux | `gatepass.desktop` | `~/.config/autostart/` |
 
 配置位置（可整目录拷贝到新机器）：
 
