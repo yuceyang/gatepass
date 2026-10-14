@@ -26,10 +26,10 @@ export function defaultConfigPath() {
 
 const DEFAULTS = {
   version: 1,
-  // 控制台监听
-  console: { host: '127.0.0.1', port: 9099 },
-  // 代理监听
-  proxy: { host: '127.0.0.1', port: 443, insecureUpstreamTls: true },
+  // 控制台监听（非常用端口，避免与常见服务冲突）
+  console: { host: '127.0.0.1', port: 19099 },
+  // 代理监听（非常用端口；如需免端口号访问可用「端口转发」把 443 转过来）
+  proxy: { host: '127.0.0.1', port: 18443, insecureUpstreamTls: true },
   // 鉴权提供者
   provider: {
     id: 'ugos',

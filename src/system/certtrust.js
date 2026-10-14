@@ -72,3 +72,25 @@ export async function checkPortFree(port, host = '127.0.0.1') {
     srv.listen(port, host);
   });
 }
+
+/**
+ * 常见服务端口：不应被本程序占用。
+ * 80/443 虽是 HTTP(S) 标准端口，但常被 IIS/nginx/系统服务使用，同样列入。
+ */
+export const COMMON_PORTS = new Set([
+  20, 21, 22, 23, 25, 53, 80, 110, 123, 135, 137, 138, 139, 143, 161, 389,
+  443, 445, 465, 587, 636, 993, 995, 1080, 1433, 1521, 2049, 2181, 2375,
+  2379, 3000, 3306, 3389, 5000, 5432, 5672, 5900, 5984, 6379, 6443, 7001,
+  8000, 8008, 8080, 8081, 8443, 8888, 9000, 9090, 9092, 9200, 9300, 9418,
+  11211, 15672, 27017, 27018, 28017,
+]);
+
+export function isCommonPort(port) {
+  return COMMON_PORTS.has(Number(port));
+}
+
+/** 供 UI/CLI 展示的提示 */
+export function commonPortWarning(port) {
+  if (!isCommonPort(port)) return null;
+  return `端口 ${port} 是常见服务端口，可能与 IIS/nginx/数据库/远程桌面等冲突，建议改用 1024 以上的非常用端口（如 18443、19099）`;
+}

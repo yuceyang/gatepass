@@ -7,6 +7,7 @@ import { Engine } from './core/engine.js';
 import { LiveLog, createConsoleServer } from './server/api.js';
 import { ensureCerts } from './system/certs.js';
 import { writeHostsBlock, flushDns } from './system/hosts.js';
+import { isCommonPort, commonPortWarning } from './system/certtrust.js';
 
 /**
  * 启动 GatePass（代理引擎 + 控制台）。
@@ -17,6 +18,15 @@ export async function start(opts = {}) {
   const configPath = opts.configPath || defaultConfigPath();
   const config = loadConfig(configPath);
   const configDir = path.dirname(configPath);
+
+  // 常见服务端口检查：提示但不强制阻止（用户可改配置）
+  const pw = commonPortWarning(config.proxy.port);
+  const cw = commonPortWarning(config.console.port);
+  if (pw) log(`[gatepass] 警告: ${pw}`);
+  if (cw) log(`[gatepass] 警告: ${cw}`);
+  if (isCommonPort(config.proxy.port) || isCommonPort(config.console.port)) {
+    log('[gatepass] 建议改用 1024 以上非常用端口（如 代理 18443、控制台 19099）');
+  }
 
   const provider = createProvider(config);
   const routes = new RouteRegistry({

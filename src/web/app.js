@@ -226,6 +226,7 @@ async function loadSettings() {
   const hosts = await api('/api/hosts');
   $('#hosts-block').textContent = hosts.block || '(尚未同步)';
   loadAutostart();
+  loadPortProxy();
 }
 
 $('#settings-form').addEventListener('submit', async (e) => {
@@ -298,6 +299,38 @@ $('#btn-autostart-off').addEventListener('click', async () => {
     await api('/api/autostart', { method: 'POST', body: JSON.stringify({ action: 'remove' }) });
     alert('已移除开机自启');
     loadAutostart();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+async function loadPortProxy() {
+  try {
+    const s = await api('/api/portproxy');
+    const lines = (s.entries || []).join('\n') || '(未配置)';
+    $('#portproxy-hint').textContent =
+      `代理端口 ${s.proxyPort}。${s.warning || ''}\n当前转发规则：\n${lines}`;
+  } catch (e) {
+    $('#portproxy-hint').textContent = '查询失败: ' + e.message;
+  }
+}
+
+$('#btn-proxy-on').addEventListener('click', async () => {
+  if (!confirm('启用 443 端口转发会占用 443（常见 HTTPS 端口）。确认继续？')) return;
+  try {
+    const r = await api('/api/portproxy', { method: 'POST', body: JSON.stringify({ action: 'install' }) });
+    alert(r.ok ? '已启用端口转发' : ('启用失败: ' + (r.error || r.note || '')));
+    loadPortProxy();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+$('#btn-proxy-off').addEventListener('click', async () => {
+  try {
+    const r = await api('/api/portproxy', { method: 'POST', body: JSON.stringify({ action: 'remove' }) });
+    alert(r.ok ? '已关闭端口转发' : ('关闭失败: ' + (r.error || '')));
+    loadPortProxy();
   } catch (err) {
     alert(err.message);
   }

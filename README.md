@@ -143,6 +143,14 @@ gatepass start
 
 非管理员时会自动弹 UAC 提权（点「是」即可）。开机自启已装的话无需手动运行。
 
+默认代理端口 **18443**，访问应用带端口号：
+
+```
+https://app-5006-yuceyang.cn68.ugdocker.link:18443/
+```
+
+如需免端口号，在控制台「设置 → 端口转发」启用 443→18443（会占用 443）。
+
 ### 4. 浏览器使用
 
 1. 打开控制台 **http://127.0.0.1:9099**
@@ -150,8 +158,8 @@ gatepass start
 3. 直接访问应用，例如：
 
 ```
-https://app-5006-yuceyang.cn68.ugdocker.link/
-https://app-9090-yuceyang.cn68.ugdocker.link/ui/
+https://app-5006-yuceyang.cn68.ugdocker.link:18443/
+https://app-9090-yuceyang.cn68.ugdocker.link:18443/ui/
 ```
 
 不会再跳绿联登录页。
@@ -185,8 +193,8 @@ gatepass help
 
 ```jsonc
 {
-  "console": { "host": "127.0.0.1", "port": 9099 },
-  "proxy":   { "host": "127.0.0.1", "port": 443, "insecureUpstreamTls": true },
+  "console": { "host": "127.0.0.1", "port": 19099 },
+  "proxy":   { "host": "127.0.0.1", "port": 18443, "insecureUpstreamTls": true },
   "provider": {
     "id": "ugos",
     "authBase": "https://your-nas.example",
@@ -198,7 +206,7 @@ gatepass help
     {
       "host": "app-5006-your.domain.example",
       "upstreamPort": "5006",          // 网关后的应用端口（换 token 用）
-      "upstreamConnectPort": "443",    // TCP 上游端口（默认 443）
+      "upstreamConnectPort": "443",    // TCP 上游端口（绿联网关是 443，这里只是目标，不是监听）
       "providerId": "ugos",
       "enabled": true
     }
@@ -211,6 +219,27 @@ gatepass help
 1. 拷贝配置目录到新机器
 2. `npm install -g .`
 3. 新机器上 `gatepass trust-ca` 与 `gatepass sync-hosts`（各机一次）
+
+### 端口策略
+
+**不占用 443/80 等常见服务端口**，默认使用非常用端口：
+
+| 用途 | 默认端口 | 说明 |
+|------|----------|------|
+| 代理 | **18443** | 转发 `app-…` 应用流量 |
+| 控制台 | **19099** | Web 管理界面 |
+
+常见服务端口（22/80/443/3306/8080/8443…）会触发警告，避免与 IIS、nginx、数据库、远程桌面等冲突。
+
+**访问方式**：
+
+```
+https://app-5006-yuceyang.cn68.ugdocker.link:18443/
+http://127.0.0.1:19099/          # 控制台
+```
+
+若希望省略端口号（`https://app-xxx…/`），可在控制台「设置 → 端口转发」显式启用
+`443 → 18443` 的系统转发（**会占用 443**，需管理员，默认关闭）。
 
 ## 架构
 

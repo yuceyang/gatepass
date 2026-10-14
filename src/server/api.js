@@ -284,6 +284,25 @@ export function createConsoleServer(deps) {
         return json(res, 200, r);
       }
 
+      // 可选：443 → 本程序端口 的系统转发（透明访问，会占用 443）
+      if (p === '/api/portproxy' && req.method === 'GET') {
+        const mod = await import('../system/portproxy.js');
+        const { commonPortWarning } = await import('../system/certtrust.js');
+        return json(res, 200, {
+          ...(await mod.getPortProxyStatus()),
+          proxyPort: config.proxy.port,
+          warning: commonPortWarning(443) || '启用后 https://app-… 可不带端口访问，但会占用 443',
+        });
+      }
+      if (p === '/api/portproxy' && req.method === 'POST') {
+        const mod = await import('../system/portproxy.js');
+        const body = await readJson(req);
+        const r = body.action === 'remove'
+          ? await mod.removePortProxy()
+          : await mod.installPortProxy(config.proxy.port);
+        return json(res, 200, r);
+      }
+
       if (p === '/api/ca' && req.method === 'GET') {
         // 提供 CA 下载
         const buf = fs.readFileSync(certs.caPath);

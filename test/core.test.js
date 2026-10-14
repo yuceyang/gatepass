@@ -123,6 +123,18 @@ test('certs: SAN 覆盖连字符主机名', async () => {
   assert.equal(await certCoversHost(r.cert, 'evil.example.com'), false);
 });
 
+test('certtrust: 常见端口识别', async () => {
+  const { isCommonPort, commonPortWarning } = await import('../src/system/certtrust.js');
+  assert.equal(isCommonPort(443), true);
+  assert.equal(isCommonPort(80), true);
+  assert.equal(isCommonPort(8080), true);
+  assert.equal(isCommonPort(3306), true);
+  assert.equal(isCommonPort(18443), false);
+  assert.equal(isCommonPort(19099), false);
+  assert.ok(commonPortWarning(443));
+  assert.equal(commonPortWarning(18443), null);
+});
+
 test('hosts: 标记块幂等', async () => {
   const hostsMod = await import('../src/system/hosts.js');
   // 在临时目录验证 render 逻辑（不写系统 hosts）
