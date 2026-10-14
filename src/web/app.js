@@ -96,13 +96,9 @@ async function loadRoutes() {
           const cell = tr.querySelector('.test-cell');
           cell.textContent = '测试中…';
           const res = await api(`/api/routes/${id}/test`, { method: 'POST' });
-          if (res.ok && !res.authRedirect) {
-            cell.innerHTML = `<span class="badge ok">${res.status || 'OK'}</span>`;
-          } else if (res.authRedirect) {
-            cell.innerHTML = `<span class="badge warn">302 登录跳转</span>`;
-            alert('测试返回登录跳转，鉴权未生效。请检查会话状态，或确认 hosts 已同步后从浏览器访问验证。');
-          } else {
-            cell.innerHTML = `<span class="badge err">${esc(res.error || res.status || '失败')}</span>`;
+          cell.innerHTML = testBadge(res);
+          if (res.authRedirect) {
+            alert('测试返回登录跳转：鉴权未生效（会话可能过期）。请在设置里检查账号，或点总览看会话状态。');
           }
         }
       } catch (e) {
@@ -349,13 +345,28 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** 路由测试结果徽章：区分「代理已生效」与「鉴权/网络失败」 */
+function testBadge(res) {
+  if (res.error) {
+    return `<span class="badge err" title="${esc(res.error)}">失败: ${esc(res.error)}</span>`;
+  }
+  const s = res.status;
+  if (res.authRedirect) {
+    return `<span class="badge warn" title="网关把请求重定向到登录页，鉴权未注入成功">302 未鉴权</span>`;
+  }
+  // 2xx/3xx/4xx 都表示请求已到达目标服务（代理链路正常）
+  if (s >= 200 && s < 500) {
+    const note = s === 200 ? '代理已生效' : '代理已生效，应用返回 ' + s;
+    return `<span class="badge ok" title="${note}">${s}</span>`;
+  }
+  return `<span class="badge err" title="上游错误">${s || '?'}</span>`;
+}
+
 // ---------- 启动 ----------
 loadStatus();
 loadRoutes();
 loadLogsOnce();
 connectWs();
 setInterval(loadStatus, 5000);
-// WS 未连通时静默轮询日志
-setInterval(() => {
-  if (!ws || ws.readyState !== 1) loadLogsOnce();
-}, 3000);
+// 日志固定轮询（2s），不依赖 WS 是否连通，保证页面自动刷新
+setInterval(loadLogsOnce, 2000);
