@@ -364,7 +364,7 @@ async function testRoute(route, provider) {
   }
 }
 
-/** 路由变更后同步 hosts，未提权则自动弹 UAC */
+/** 路由变更后同步 hosts，未提权则自动弹 UAC；UAC 失败走任务计划兜底 */
 async function syncHostsAfterChange(routes) {
   const entries = routes.hostsEntries();
   if (!entries.length) return { hostsSynced: true, hostsChanged: false };
@@ -373,21 +373,32 @@ async function syncHostsAfterChange(routes) {
     const result = hostsMod.writeHostsBlock(entries);
     await hostsMod.flushDns().catch(() => {});
     return { hostsSynced: true, hostsChanged: result.changed, hostsPath: result.path };
-  } catch {
-    // 无权限：自动请求 UAC 写入，用户只点「是」
+  } catch (e1) {
     if (process.platform === 'win32') {
-      const { runElevatedPowerShell } = await import('../system/elevate.js');
+      const { runElevatedPowerShell, runViaScheduledTask } = await import('../system/elevate.js');
       const hostsMod = await import('../system/hosts.js');
       const cmdObj = hostsMod.elevatedWriteCommand(entries);
-      const r = runElevatedPowerShell(cmdObj.script);
+      const r1 = runElevatedPowerShell(cmdObj.script);
+      // 任务计划兜底（UAC 静默失败时仍可能写入）
+      let r2 = null;
+      try {
+        r2 = await runViaScheduledTask(cmdObj.script);
+      } catch {
+        r2 = null;
+      }
       return {
         hostsSynced: false,
         hostsElevating: true,
-        hostsHint: r.note + '。完成后刷新页面即可。',
+        hostsHint:
+          (r1.note || '') +
+          (r2?.ok ? '；已同时通过任务计划尝试写入。' : '') +
+          ' 若 UAC 未弹出且稍后 hosts 未生效，请点「复制命令」用管理员 PowerShell 执行。',
+        manualCommand: `powershell -NoProfile -ExecutionPolicy Bypass -File "${r1.script}"`,
       };
     }
     return {
       hostsSynced: false,
+      hostsError: e1.message,
       hostsHint: 'hosts 需要管理员权限，请用 sudo 运行 gatepass sync-hosts',
     };
   }

@@ -148,7 +148,9 @@ $('#route-form').addEventListener('submit', async (e) => {
     }
     $('#route-form-panel').classList.add('hidden');
     if (saved && saved._hosts && saved._hosts.hostsElevating) {
-      alert('路由已保存。\n\n' + (saved._hosts.hostsHint || '正在请求管理员权限写入 hosts，请在 UAC 弹窗点“是”。'));
+      const msg = (saved._hosts.hostsHint || '正在请求管理员权限写入 hosts。') +
+        (saved._hosts.manualCommand ? '\n\n若 UAC 未弹出，复制下面命令用管理员 PowerShell 执行：\n' + saved._hosts.manualCommand : '');
+      alert(msg);
     } else if (saved && saved._hosts && saved._hosts.hostsSynced === false) {
       alert('路由已保存，但 hosts 同步失败：' + (saved._hosts.hostsError || saved._hosts.hostsHint || ''));
     }
