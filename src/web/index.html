@@ -119,15 +119,14 @@
       </div>
 
       <div class="panel">
-        <h2>端口转发（可选，透明访问）</h2>
+        <h2>端口转发（443 → 代理端口）</h2>
         <div class="actions">
-          <button id="btn-proxy-on">启用 443 → 本机代理端口转发</button>
-          <button id="btn-proxy-off">关闭端口转发</button>
+          <button id="btn-proxy-on" class="primary">启用 443 转发</button>
+          <button id="btn-proxy-off">关闭 443 转发</button>
         </div>
         <p class="hint" id="portproxy-hint">
-          默认代理监听非常用端口（如 18443），不占用 443/80 等常见服务端口。
-          若希望浏览器直接用 <code>https://app-xxx…/</code> 不带端口号，可启用本转发（会占用 443，需管理员）。
-          不启用时请用 <code>https://app-xxx…:18443/</code> 访问。
+          服务监听在非常用端口（如 18443）。启用 443 转发后，浏览器用
+          <code>https://app-xxx…/</code>（不带端号）即可访问，推荐保持启用。
         </p>
       </div>
 
