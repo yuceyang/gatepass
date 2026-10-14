@@ -9,8 +9,7 @@ import { ensureCerts } from './system/certs.js';
 import { writeHostsBlock, flushDns } from './system/hosts.js';
 
 /**
- * 启动 GatePass（代理引擎 + 控制台）。
- * @param {{configPath?:string, log?:Function}} [opts]
+ * 鍚姩 GatePass锛堜唬鐞嗗紩鎿?+ 鎺у埗鍙帮級銆? * @param {{configPath?:string, log?:Function}} [opts]
  */
 export async function start(opts = {}) {
   const log = opts.log || ((...a) => console.log(new Date().toISOString().slice(11, 19), ...a));
@@ -47,25 +46,24 @@ export async function start(opts = {}) {
     onEvent: (evt) => live.push(evt),
   });
 
-  // 代理 HTTPS
+  // 浠ｇ悊 HTTPS
   try {
     await engine.listen(config.proxy.port, config.proxy.host);
   } catch (e) {
     if (e.code === 'EACCES' || e.code === 'EADDRINUSE') {
-      // 绑不上 443：自动请求管理员重启（用户只点一次 UAC）
-      const { isElevated, relaunchElevated } = await import('./system/elevate.js');
+      // 缁戜笉涓?443锛氳嚜鍔ㄨ姹傜鐞嗗憳閲嶅惎锛堢敤鎴峰彧鐐逛竴娆?UAC锛?      const { isElevated, relaunchElevated } = await import('./system/elevate.js');
       if (!isElevated() && process.platform === 'win32') {
-        log(`[gatepass] 端口 ${config.proxy.port} 需要管理员，正在请求提权…`);
+        log(`[gatepass] 绔彛 ${config.proxy.port} 闇€瑕佺鐞嗗憳锛屾鍦ㄨ姹傛彁鏉冣€);
         const r = relaunchElevated();
         log(`[gatepass] ${r.note}`);
         return { relaunchedElevated: true, async close() {} };
       }
-      throw new Error(`代理端口 ${config.proxy.port} 无法监听（${e.code}）。请用管理员权限运行，或修改 config.proxy.port`);
+      throw new Error(`浠ｇ悊绔彛 ${config.proxy.port} 鏃犳硶鐩戝惉锛?{e.code}锛夈€傝鐢ㄧ鐞嗗憳鏉冮檺杩愯锛屾垨淇敼 config.proxy.port`);
     }
     throw e;
   }
 
-  // 控制台 HTTP
+  // 鎺у埗鍙?HTTP
   const consoleServer = createConsoleServer({
     provider,
     routes,
@@ -80,33 +78,32 @@ export async function start(opts = {}) {
     consoleServer.once('error', reject);
     consoleServer.listen(config.console.port, config.console.host, resolve);
   });
-  log(`[gatepass] 控制台 http://${config.console.host}:${config.console.port}`);
-  log(`[gatepass] 代理   https://${config.proxy.host}:${config.proxy.port}  →  *.${config.provider?.domainSuffix}`);
+  log(`[gatepass] 鎺у埗鍙?http://${config.console.host}:${config.console.port}`);
+  log(`[gatepass] 浠ｇ悊   https://${config.proxy.host}:${config.proxy.port}  鈫? *.${config.provider?.domainSuffix}`);
 
-  // 启动预登录（失败不退出）
+  // 鍚姩棰勭櫥褰曪紙澶辫触涓嶉€€鍑猴級
   provider.ensureSession().then(
-    (s) => log(`[gatepass] 会话: ${s.ok ? 'OK' : s.detail}`),
-    (e) => log(`[gatepass] 预登录失败: ${e.message}`)
+    (s) => log(`[gatepass] 浼氳瘽: ${s.ok ? 'OK' : s.detail}`),
+    (e) => log(`[gatepass] 棰勭櫥褰曞け璐? ${e.message}`)
   );
 
-  // 同步 hosts（失败仅提示；未提权则自动请求 UAC）
-  try {
+  // 鍚屾 hosts锛堝け璐ヤ粎鎻愮ず锛涙湭鎻愭潈鍒欒嚜鍔ㄨ姹?UAC锛?  try {
     const entries = routes.hostsEntries();
     if (entries.length) {
       const r = writeHostsBlock(entries);
       await flushDns();
-      log(`[gatepass] hosts ${r.changed ? '已更新' : '无变化'}（${entries.length} 条）`);
+      log(`[gatepass] hosts ${r.changed ? '宸叉洿鏂? : '鏃犲彉鍖?}锛?{entries.length} 鏉★級`);
     }
   } catch (e) {
-    log(`[gatepass] hosts 写入失败: ${e.message}`);
+    log(`[gatepass] hosts 鍐欏叆澶辫触: ${e.message}`);
     if (process.platform === 'win32') {
       const { runElevatedPowerShell } = await import('./system/elevate.js');
       const { elevatedWriteCommand } = await import('./system/hosts.js');
       const cmdObj = elevatedWriteCommand(routes.hostsEntries());
-      const r2 = runElevatedPowerShell(cmdObj.args.join(' '));
+      const r2 = runElevatedPowerShell(cmdObj.script);
       log(`[gatepass] ${r2.note}`);
     } else {
-      log(`[gatepass] 可在控制台「设置 → 系统集成」查看待写入内容`);
+      log(`[gatepass] 鍙湪鎺у埗鍙般€岃缃?鈫?绯荤粺闆嗘垚銆嶆煡鐪嬪緟鍐欏叆鍐呭`);
     }
   }
 

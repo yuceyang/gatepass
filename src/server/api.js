@@ -18,8 +18,7 @@ const MIME = {
 };
 
 /**
- * 环形缓冲 + WS 广播的实时请求日志。
- */
+ * 鐜舰缂撳啿 + WS 骞挎挱鐨勫疄鏃惰姹傛棩蹇椼€? */
 export class LiveLog {
   constructor(size = 2000) {
     this.size = size;
@@ -50,7 +49,7 @@ export class LiveLog {
 
   attach(socket) {
     this.sockets.add(socket);
-    // 延后发 hello，确保客户端已挂好 data 监听
+    // 寤跺悗鍙?hello锛岀‘淇濆鎴风宸叉寕濂?data 鐩戝惉
     setImmediate(() => {
       try {
         socket.send(JSON.stringify({ type: 'hello', count: this.buf.length }));
@@ -65,7 +64,7 @@ export class LiveLog {
   }
 }
 
-/** 极简 WebSocket（RFC6455 文本帧）服务端，足够控制台日志推送 */
+/** 鏋佺畝 WebSocket锛圧FC6455 鏂囨湰甯э級鏈嶅姟绔紝瓒冲鎺у埗鍙版棩蹇楁帹閫?*/
 function attachWebSocketUpgrade(server, liveLog) {
   server.on('upgrade', (req, socket) => {
     if (!req.url.startsWith('/ws')) {
@@ -93,7 +92,7 @@ function attachWebSocketUpgrade(server, liveLog) {
     socket.on('close', () => liveLog.detach(ws));
     socket.on('error', () => liveLog.detach(ws));
     socket.on('data', (buf) => {
-      // 忽略客户端帧（含 ping/pong 关闭）；收到 close 则断开
+      // 蹇界暐瀹㈡埛绔抚锛堝惈 ping/pong 鍏抽棴锛夛紱鏀跺埌 close 鍒欐柇寮€
       if (buf.length > 1 && (buf[0] & 0x0f) === 0x8) socket.destroy();
     });
   });
@@ -130,8 +129,7 @@ function makeWsWrapper(socket) {
 }
 
 /**
- * 控制台 HTTP 服务：REST API + 静态前端 + WS 日志。
- *
+ * 鎺у埗鍙?HTTP 鏈嶅姟锛歊EST API + 闈欐€佸墠绔?+ WS 鏃ュ織銆? *
  * @param {{
  *   provider: any,
  *   routes: any,
@@ -150,8 +148,7 @@ export function createConsoleServer(deps) {
     const url = new URL(req.url, 'http://127.0.0.1');
     const p = url.pathname;
 
-    // CORS（本地控制台）
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // CORS锛堟湰鍦版帶鍒跺彴锛?    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     if (req.method === 'OPTIONS') {
@@ -224,7 +221,7 @@ export function createConsoleServer(deps) {
 
       if (p === '/api/settings' && req.method === 'GET') {
         return json(res, 200, {
-          provider: { ...config.provider, password: config.provider?.password ? '••••••' : '' },
+          provider: { ...config.provider, password: config.provider?.password ? '鈥⑩€⑩€⑩€⑩€⑩€? : '' },
           proxy: config.proxy,
           console: config.console,
           onboardingDone: !!config.onboardingDone,
@@ -233,8 +230,8 @@ export function createConsoleServer(deps) {
       if (p === '/api/settings' && req.method === 'PUT') {
         const body = await readJson(req);
         if (body.provider) {
-          // 密码留空表示不改
-          if (body.provider.password === '••••••' || body.provider.password === undefined) {
+          // 瀵嗙爜鐣欑┖琛ㄧず涓嶆敼
+          if (body.provider.password === '鈥⑩€⑩€⑩€⑩€⑩€? || body.provider.password === undefined) {
             delete body.provider.password;
           }
           Object.assign(config.provider, body.provider);
@@ -261,7 +258,7 @@ export function createConsoleServer(deps) {
         const autostartMod = await import('../system/autostart.js');
         const entries = routes.hostsEntries();
         const cmd = hostsMod.elevatedWriteCommand(entries);
-        const blockText = cmd.args.join(' ');
+        const blockText = cmd.script || '';
         const wrap = await autostartMod.tryElevatedHostsWrite(blockText.match(/# gatepass begin[\s\S]*?# gatepass end/)?.[0] || '');
         if (wrap.ok && process.platform === 'win32') {
           autostartMod.launchElevatedHostsScript(wrap.script);
@@ -285,7 +282,7 @@ export function createConsoleServer(deps) {
       }
 
       if (p === '/api/ca' && req.method === 'GET') {
-        // 提供 CA 下载
+        // 鎻愪緵 CA 涓嬭浇
         const buf = fs.readFileSync(certs.caPath);
         res.writeHead(200, {
           'Content-Type': 'application/x-x509-ca-cert',
@@ -295,10 +292,9 @@ export function createConsoleServer(deps) {
         return;
       }
 
-      // 静态前端
-      return serveStatic(res, p);
+      // 闈欐€佸墠绔?      return serveStatic(res, p);
     } catch (e) {
-      log(`[console] ${req.method} ${p} 错误: ${e.message}`);
+      log(`[console] ${req.method} ${p} 閿欒: ${e.message}`);
       return json(res, 400, { error: e.message });
     }
   });
@@ -320,8 +316,8 @@ async function testRoute(route, provider) {
     const dns = await import('node:dns/promises');
     const addrs = await dns.resolve4(route.upstreamHost || route.host).catch(() => []);
     const ip = addrs[0];
-    if (!ip) return { ok: false, error: 'DNS 解析失败' };
-    // 与代理一致：注入鉴权后再探测，否则网关 302
+    if (!ip) return { ok: false, error: 'DNS 瑙ｆ瀽澶辫触' };
+    // 涓庝唬鐞嗕竴鑷达細娉ㄥ叆閴存潈鍚庡啀鎺㈡祴锛屽惁鍒欑綉鍏?302
     const injected = await provider.applyToRequest(
       { headers: { host: route.host }, path: '/' },
       route
@@ -332,8 +328,7 @@ async function testRoute(route, provider) {
         {
           host: ip,
           servername: route.upstreamHost || route.host,
-          // TCP 上游连网关 443；upstreamPort 是网关后的应用端口
-          port: Number(route.upstreamConnectPort || 443),
+          // TCP 涓婃父杩炵綉鍏?443锛泆pstreamPort 鏄綉鍏冲悗鐨勫簲鐢ㄧ鍙?          port: Number(route.upstreamConnectPort || 443),
           path: '/',
           method: 'GET',
           rejectUnauthorized: false,
@@ -348,7 +343,7 @@ async function testRoute(route, provider) {
             status: res.statusCode,
             location: loc,
             authRedirect,
-            note: authRedirect ? '仍被重定向到登录页，鉴权可能未生效' : undefined,
+            note: authRedirect ? '浠嶈閲嶅畾鍚戝埌鐧诲綍椤碉紝閴存潈鍙兘鏈敓鏁? : undefined,
           });
         }
       );
@@ -364,7 +359,7 @@ async function testRoute(route, provider) {
   }
 }
 
-/** 路由变更后同步 hosts，未提权则自动弹 UAC */
+/** 璺敱鍙樻洿鍚庡悓姝?hosts锛屾湭鎻愭潈鍒欒嚜鍔ㄥ脊 UAC */
 async function syncHostsAfterChange(routes) {
   const entries = routes.hostsEntries();
   if (!entries.length) return { hostsSynced: true, hostsChanged: false };
@@ -374,21 +369,20 @@ async function syncHostsAfterChange(routes) {
     await hostsMod.flushDns().catch(() => {});
     return { hostsSynced: true, hostsChanged: result.changed, hostsPath: result.path };
   } catch {
-    // 无权限：自动请求 UAC 写入，用户只点「是」
-    if (process.platform === 'win32') {
+    // 鏃犳潈闄愶細鑷姩璇锋眰 UAC 鍐欏叆锛岀敤鎴峰彧鐐广€屾槸銆?    if (process.platform === 'win32') {
       const { runElevatedPowerShell } = await import('../system/elevate.js');
       const hostsMod = await import('../system/hosts.js');
       const cmdObj = hostsMod.elevatedWriteCommand(entries);
-      const r = runElevatedPowerShell(cmdObj.args.join(' '));
+      const r = runElevatedPowerShell(cmdObj.script);
       return {
         hostsSynced: false,
         hostsElevating: true,
-        hostsHint: r.note + '。完成后刷新页面即可。',
+        hostsHint: r.note + '銆傚畬鎴愬悗鍒锋柊椤甸潰鍗冲彲銆?,
       };
     }
     return {
       hostsSynced: false,
-      hostsHint: 'hosts 需要管理员权限，请用 sudo 运行 gatepass sync-hosts',
+      hostsHint: 'hosts 闇€瑕佺鐞嗗憳鏉冮檺锛岃鐢?sudo 杩愯 gatepass sync-hosts',
     };
   }
 }
@@ -408,7 +402,7 @@ function readJson(req) {
         const text = Buffer.concat(chunks).toString('utf8');
         resolve(text ? JSON.parse(text) : {});
       } catch (e) {
-        reject(new Error('JSON 解析失败'));
+        reject(new Error('JSON 瑙ｆ瀽澶辫触'));
       }
     });
     req.on('error', reject);

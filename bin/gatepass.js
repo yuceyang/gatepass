@@ -11,21 +11,14 @@ import { isElevated, relaunchElevated } from '../src/system/elevate.js';
 
 const [, , cmd = 'help', ...rest] = process.argv;
 
-const HELP = `GatePass — 免重复登录的网关反向代理
+const HELP = `GatePass 鈥?鍏嶉噸澶嶇櫥褰曠殑缃戝叧鍙嶅悜浠ｇ悊
 
-用法:
-  gatepass init             首次向导（生成配置/证书，引导 hosts 与 CA 信任）
-  gatepass start            启动代理 + Web 控制台
-  gatepass status           查看配置路径与端口
-  gatepass sync-hosts       按当前路由同步系统 hosts
-  gatepass print-hosts      打印待写入的 hosts 块
-  gatepass trust-ca         打印/尝试导入 CA 证书
-  gatepass install-autostart   安装开机自启
-  gatepass remove-autostart    移除开机自启
-  gatepass help             显示本帮助
-
-环境变量:
-  GATEPASS_HOME             覆盖配置目录（默认平台用户数据目录）
+鐢ㄦ硶:
+  gatepass init             棣栨鍚戝锛堢敓鎴愰厤缃?璇佷功锛屽紩瀵?hosts 涓?CA 淇′换锛?  gatepass start            鍚姩浠ｇ悊 + Web 鎺у埗鍙?  gatepass status           鏌ョ湅閰嶇疆璺緞涓庣鍙?  gatepass sync-hosts       鎸夊綋鍓嶈矾鐢卞悓姝ョ郴缁?hosts
+  gatepass print-hosts      鎵撳嵃寰呭啓鍏ョ殑 hosts 鍧?  gatepass trust-ca         鎵撳嵃/灏濊瘯瀵煎叆 CA 璇佷功
+  gatepass install-autostart   瀹夎寮€鏈鸿嚜鍚?  gatepass remove-autostart    绉婚櫎寮€鏈鸿嚜鍚?  gatepass help             鏄剧ず鏈府鍔?
+鐜鍙橀噺:
+  GATEPASS_HOME             瑕嗙洊閰嶇疆鐩綍锛堥粯璁ゅ钩鍙扮敤鎴锋暟鎹洰褰曪級
 `;
 
 function log(...a) {
@@ -36,14 +29,14 @@ async function init() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q, def = '') => rl.question(q + (def ? ` [${def}]` : '') + ': ').then((a) => a.trim() || def);
 
-  log('\n=== GatePass 首次向导 ===\n');
-  const authBase = await ask('NAS 登录地址（如 https://xxx.cn68.ug.link）');
-  const username = await ask('用户名');
-  const password = await ask('密码');
-  const domainSuffix = await ask('代理域名后缀（如 yuceyang.cn68.ugdocker.link）');
-  const routeHost = await ask('首个路由主机名（如 app-5006-yuceyang.cn68.ugdocker.link，可留空稍后在控制台添加）');
-  const proxyPort = await ask('代理端口', '443');
-  const consolePort = await ask('控制台端口', '9099');
+  log('\n=== GatePass 棣栨鍚戝 ===\n');
+  const authBase = await ask('NAS 鐧诲綍鍦板潃锛堝 https://xxx.cn68.ug.link锛?);
+  const username = await ask('鐢ㄦ埛鍚?);
+  const password = await ask('瀵嗙爜');
+  const domainSuffix = await ask('浠ｇ悊鍩熷悕鍚庣紑锛堝 yuceyang.cn68.ugdocker.link锛?);
+  const routeHost = await ask('棣栦釜璺敱涓绘満鍚嶏紙濡?app-5006-yuceyang.cn68.ugdocker.link锛屽彲鐣欑┖绋嶅悗鍦ㄦ帶鍒跺彴娣诲姞锛?);
+  const proxyPort = await ask('浠ｇ悊绔彛', '443');
+  const consolePort = await ask('鎺у埗鍙扮鍙?, '9099');
 
   const configPath = defaultConfigPath();
   const config = loadConfig(configPath);
@@ -66,20 +59,19 @@ async function init() {
       const r = rr.add({ host: routeHost });
       config.routes = [r];
     } catch (e) {
-      log(`  路由添加跳过: ${e.message}`);
+      log(`  璺敱娣诲姞璺宠繃: ${e.message}`);
     }
   }
 
   saveConfig(config, configPath);
-  log(`\n[1/4] 配置已保存: ${configPath}`);
+  log(`\n[1/4] 閰嶇疆宸蹭繚瀛? ${configPath}`);
 
-  // 端口检测
-  const p443 = await checkPortFree(config.proxy.port, config.proxy.host);
-  log(`[2/4] 端口 ${config.proxy.port}: ${p443.free ? '可用' : '被占用（' + (p443.error || '') + '）'}`);
+  // 绔彛妫€娴?  const p443 = await checkPortFree(config.proxy.port, config.proxy.host);
+  log(`[2/4] 绔彛 ${config.proxy.port}: ${p443.free ? '鍙敤' : '琚崰鐢紙' + (p443.error || '') + '锛?}`);
   const pCons = await checkPortFree(config.console.port, config.console.host);
-  log(`      控制台 ${config.console.port}: ${pCons.free ? '可用' : '被占用'}`);
+  log(`      鎺у埗鍙?${config.console.port}: ${pCons.free ? '鍙敤' : '琚崰鐢?}`);
 
-  // 证书
+  // 璇佷功
   const certDir = path.join(path.dirname(configPath), 'certs');
   const hosts = config.routes.map((r) => r.host);
   const certs = ensureCerts({
@@ -88,55 +80,55 @@ async function init() {
     certDir,
     force: false,
   });
-  log(`[3/4] 证书: ${certs.certPath}`);
+  log(`[3/4] 璇佷功: ${certs.certPath}`);
   const trust = trustCaCommand(certs.caPath);
-  log(`      导入 CA（${trust.note}）:`);
+  log(`      瀵煎叆 CA锛?{trust.note}锛?`);
   log(`      ${trust.command} ${trust.args.join(' ')}`);
 
   // hosts
   const entries = config.routes.filter((r) => r.enabled !== false).map((r) => ({ ip: '127.0.0.1', host: r.host, comment: 'gatepass' }));
   log('[4/4] hosts:');
   if (entries.length === 0) {
-    log('      （无路由，跳过）');
+    log('      锛堟棤璺敱锛岃烦杩囷級');
   } else {
     try {
       const r = writeHostsBlock(entries);
       await flushDns();
-      log(`      已写入 ${r.path}`);
+      log(`      宸插啓鍏?${r.path}`);
     } catch (e) {
-      log(`      写入失败: ${e.message}`);
+      log(`      鍐欏叆澶辫触: ${e.message}`);
       if (process.platform === 'win32') {
         const { runElevatedPowerShell } = await import('../src/system/elevate.js');
         const { elevatedWriteCommand } = await import('../src/system/hosts.js');
         const cmdObj = elevatedWriteCommand(entries);
-        const r2 = runElevatedPowerShell(cmdObj.args.join(' '));
+        const r2 = runElevatedPowerShell(cmdObj.script);
         log(`      ${r2.note}`);
       } else {
         const cmd2 = elevatedWriteCommand(entries);
-        log(`      请手动执行（${cmd2.note}）:`);
+        log(`      璇锋墜鍔ㄦ墽琛岋紙${cmd2.note}锛?`);
         log(`      ${cmd2.command} ${cmd2.args.join(' ')}`);
       }
     }
   }
 
   rl.close();
-  log('\n完成。运行 `gatepass start` 启动。\n');
+  log('\n瀹屾垚銆傝繍琛?`gatepass start` 鍚姩銆俓n');
 }
 
 async function cmdStatus() {
   const configPath = defaultConfigPath();
   const exists = fs.existsSync(configPath);
-  log('配置路径:', configPath, exists ? '(已存在)' : '(未初始化，先跑 gatepass init)');
+  log('閰嶇疆璺緞:', configPath, exists ? '(宸插瓨鍦?' : '(鏈垵濮嬪寲锛屽厛璺?gatepass init)');
   if (exists) {
     const cfg = loadConfig(configPath);
-    log('代理端口:', `${cfg.proxy.host}:${cfg.proxy.port}`);
-    log('控制台端口:', `${cfg.console.host}:${cfg.console.port}`);
-    log('域名后缀:', cfg.provider?.domainSuffix || '(未设置)');
-    log('路由数:', cfg.routes?.length || 0);
+    log('浠ｇ悊绔彛:', `${cfg.proxy.host}:${cfg.proxy.port}`);
+    log('鎺у埗鍙扮鍙?', `${cfg.console.host}:${cfg.console.port}`);
+    log('鍩熷悕鍚庣紑:', cfg.provider?.domainSuffix || '(鏈缃?');
+    log('璺敱鏁?', cfg.routes?.length || 0);
   }
-  log('CA/证书目录:', path.join(path.dirname(configPath), 'certs'));
+  log('CA/璇佷功鐩綍:', path.join(path.dirname(configPath), 'certs'));
   const block = readHostsBlock();
-  log('hosts 标记块:', block ? '已写入' : '未写入');
+  log('hosts 鏍囪鍧?', block ? '宸插啓鍏? : '鏈啓鍏?);
 }
 
 async function cmdSyncHosts() {
@@ -145,27 +137,27 @@ async function cmdSyncHosts() {
   const rr = new RouteRegistry({ routes: cfg.routes });
   const entries = rr.hostsEntries();
   if (!entries.length) {
-    log('无路由，跳过');
+    log('鏃犺矾鐢憋紝璺宠繃');
     return;
   }
   if (!isElevated() && process.platform === 'win32') {
-    log('需要管理员权限写 hosts，正在请求提权…');
+    log('闇€瑕佺鐞嗗憳鏉冮檺鍐?hosts锛屾鍦ㄨ姹傛彁鏉冣€?);
     const { runElevatedPowerShell } = await import('../src/system/elevate.js');
     const { elevatedWriteCommand } = await import('../src/system/hosts.js');
     const cmdObj = elevatedWriteCommand(entries);
-    const r = runElevatedPowerShell(cmdObj.args.join(' '));
+    const r = runElevatedPowerShell(cmdObj.script);
     log(r.note);
-    log('稍后在控制台点「同步 hosts」或重新运行 gatepass sync-hosts 验证。');
+    log('绋嶅悗鍦ㄦ帶鍒跺彴鐐广€屽悓姝?hosts銆嶆垨閲嶆柊杩愯 gatepass sync-hosts 楠岃瘉銆?);
     return;
   }
   try {
     const r = writeHostsBlock(entries);
     await flushDns();
-    log(r.changed ? 'hosts 已更新' : 'hosts 无变化');
+    log(r.changed ? 'hosts 宸叉洿鏂? : 'hosts 鏃犲彉鍖?);
   } catch (e) {
-    log('写入失败:', e.message);
+    log('鍐欏叆澶辫触:', e.message);
     const c = elevatedWriteCommand(entries);
-    log('请手动执行（' + c.note + '）:');
+    log('璇锋墜鍔ㄦ墽琛岋紙' + c.note + '锛?');
     log(c.command, c.args.join(' '));
   }
 }
@@ -174,7 +166,7 @@ function cmdPrintHosts() {
   const cfg = loadConfig();
   const entries = (cfg.routes || []).filter((r) => r.enabled !== false).map((r) => ({ ip: '127.0.0.1', host: r.host, comment: 'gatepass' }));
   const c = elevatedWriteCommand(entries);
-  log('# 将以下内容追加到系统 hosts（' + c.note + '）:');
+  log('# 灏嗕互涓嬪唴瀹硅拷鍔犲埌绯荤粺 hosts锛? + c.note + '锛?');
   log('');
   for (const e of entries) log(`${e.ip}\t${e.host}`);
 }
@@ -183,21 +175,19 @@ function cmdTrustCa() {
   const certDir = path.join(defaultConfigDir(), 'certs');
   const caPath = path.join(certDir, 'ca.crt');
   if (!fs.existsSync(caPath)) {
-    log('CA 不存在:', caPath, '— 先运行 gatepass init 或 gatepass start');
+    log('CA 涓嶅瓨鍦?', caPath, '鈥?鍏堣繍琛?gatepass init 鎴?gatepass start');
     return;
   }
   const t = trustCaCommand(caPath);
-  log('CA 路径:', caPath);
-  log('导入命令（' + t.note + '）:');
+  log('CA 璺緞:', caPath);
+  log('瀵煎叆鍛戒护锛? + t.note + '锛?');
   log(t.command, t.args.join(' '));
 }
 
 async function main() {
-  // start / sync-hosts / init 需要管理员（443 端口、写系统 hosts）。
-  // 未提权时自动以管理员重新拉起，用户只需点一次 UAC「是」。
-  const needsAdmin = cmd === 'start' || cmd === 'sync-hosts';
+  // start / sync-hosts / init 闇€瑕佺鐞嗗憳锛?43 绔彛銆佸啓绯荤粺 hosts锛夈€?  // 鏈彁鏉冩椂鑷姩浠ョ鐞嗗憳閲嶆柊鎷夎捣锛岀敤鎴峰彧闇€鐐逛竴娆?UAC銆屾槸銆嶃€?  const needsAdmin = cmd === 'start' || cmd === 'sync-hosts';
   if (needsAdmin && !isElevated() && process.platform === 'win32') {
-    log('需要管理员权限，正在请求提权…');
+    log('闇€瑕佺鐞嗗憳鏉冮檺锛屾鍦ㄨ姹傛彁鏉冣€?);
     const r = relaunchElevated();
     log(r.note);
     if (r.ok) return;
@@ -225,13 +215,13 @@ async function main() {
     case 'install-autostart': {
       const mod = await import('../src/system/autostart.js');
       const r = await mod.installAutostart();
-      log('开机自启已安装:', r.path);
+      log('寮€鏈鸿嚜鍚凡瀹夎:', r.path);
       break;
     }
     case 'remove-autostart': {
       const mod = await import('../src/system/autostart.js');
       const r = await mod.removeAutostart();
-      log(r.removed ? '开机自启已移除' : '未安装开机自启', r.path);
+      log(r.removed ? '寮€鏈鸿嚜鍚凡绉婚櫎' : '鏈畨瑁呭紑鏈鸿嚜鍚?, r.path);
       break;
     }
     case 'help':
@@ -240,13 +230,13 @@ async function main() {
       log(HELP);
       break;
     default:
-      log(`未知命令: ${cmd}\n`);
+      log(`鏈煡鍛戒护: ${cmd}\n`);
       log(HELP);
       process.exitCode = 1;
   }
 }
 
 main().catch((e) => {
-  console.error('错误:', e.message);
+  console.error('閿欒:', e.message);
   process.exit(1);
 });

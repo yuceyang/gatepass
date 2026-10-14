@@ -102,20 +102,34 @@ export function readHostsBlock() {
 
 /**
  * 平台提权写 hosts 的命令（能力缺失时降级输出）。
- * @returns {{command:string, args:string[], shell:string}|null}
+ * @returns {{command:string, args:string[], shell:string, script:string, note:string}}
  */
 export function elevatedWriteCommand(entries) {
   const block = renderBlock(entries);
   const p = hostsPath();
+  const nl = String.fromCharCode(13, 10);
+  // 可直接作为 .ps1 执行的脚本体：替换/清理标记块后写入
+  const script = [
+    `$p='${p}'`,
+    `$c=@'`,
+    block,
+    `'@`,
+    `$t=[System.IO.File]::ReadAllText($p)`,
+    `$t=[regex]::Replace($t,'(?s)# gatepass begin[\\s\\S]*?# gatepass end','')`,
+    `$t=[regex]::Replace($t,'(?s)# ===== ugdocker-proxy BEGIN =====[\\s\\S]*?# ===== ugdocker-proxy END =====','')`,
+    `$t=$t.TrimEnd()+"${nl}${nl}"+$c.Trim()+"${nl}"`,
+    `$enc=New-Object System.Text.UTF8Encoding($false)`,
+    `[System.IO.File]::WriteAllText($p,$t,$enc)`,
+    `ipconfig /flushdns`,
+    '',
+  ].join('\n');
+
   if (process.platform === 'win32') {
     return {
       shell: 'powershell',
       command: 'powershell',
-      args: [
-        '-NoProfile',
-        '-Command',
-        `Add-Content -Path '${p}' -Value @'\n${block}\n'@ -Encoding ASCII`,
-      ],
+      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script.replace(/\r?\n/g, '; ')],
+      script,
       note: '需以管理员身份运行',
     };
   }
@@ -123,6 +137,7 @@ export function elevatedWriteCommand(entries) {
     shell: 'sh',
     command: 'sh',
     args: ['-c', `printf '\\n%s\\n' ${JSON.stringify(block)} >> ${JSON.stringify(p)}`],
+    script,
     note: '需要 sudo',
   };
 }
