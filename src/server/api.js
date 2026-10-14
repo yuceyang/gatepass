@@ -182,7 +182,8 @@ export function createConsoleServer(deps) {
         const body = await readJson(req);
         const r = routes.add(body);
         persistRoutes();
-        return json(res, 201, r);
+        const hs = await syncHostsAfterChange(routes);
+        return json(res, 201, { ...r, _hosts: hs });
       }
 
       const m = p.match(/^\/api\/routes\/([^/]+)$/);
@@ -194,12 +195,14 @@ export function createConsoleServer(deps) {
         const body = await readJson(req);
         const r = routes.update(m[1], body);
         persistRoutes();
-        return json(res, 200, r);
+        const hs = await syncHostsAfterChange(routes);
+        return json(res, 200, { ...r, _hosts: hs });
       }
       if (m && req.method === 'DELETE') {
         const ok = routes.remove(m[1]);
         persistRoutes();
-        return json(res, ok ? 200 : 404, { ok });
+        const hs = await syncHostsAfterChange(routes);
+        return json(res, ok ? 200 : 404, { ok, _hosts: hs });
       }
 
       const m2 = p.match(/^\/api\/routes\/([^/]+)\/test$/);
@@ -318,6 +321,12 @@ async function testRoute(route, provider) {
     const addrs = await dns.resolve4(route.upstreamHost || route.host).catch(() => []);
     const ip = addrs[0];
     if (!ip) return { ok: false, error: 'DNS 解析失败' };
+    // 与代理一致：注入鉴权后再探测，否则网关 302
+    const injected = await provider.applyToRequest(
+      { headers: { host: route.host }, path: '/' },
+      route
+    );
+    const headers = { ...injected.headers, host: route.upstreamHost || route.host };
     return await new Promise((resolve) => {
       const req = https.request(
         {
@@ -328,11 +337,19 @@ async function testRoute(route, provider) {
           path: '/',
           method: 'GET',
           rejectUnauthorized: false,
-          headers: { host: route.host },
+          headers,
         },
         (res) => {
           res.resume();
-          resolve({ ok: res.statusCode < 400 || res.statusCode === 401, status: res.statusCode, location: res.headers.location || null });
+          const loc = res.headers.location || null;
+          const authRedirect = provider.isAuthRedirect(res.statusCode, loc);
+          resolve({
+            ok: res.statusCode < 400 || res.statusCode === 401 || res.statusCode === 404,
+            status: res.statusCode,
+            location: loc,
+            authRedirect,
+            note: authRedirect ? '仍被重定向到登录页，鉴权可能未生效' : undefined,
+          });
         }
       );
       req.on('error', (e) => resolve({ ok: false, error: e.message }));
@@ -344,6 +361,23 @@ async function testRoute(route, provider) {
     });
   } catch (e) {
     return { ok: false, error: e.message };
+  }
+}
+
+/** 路由变更后同步 hosts，失败只返回提示不抛错 */
+async function syncHostsAfterChange(routes) {
+  try {
+    const hostsMod = await import('../system/hosts.js');
+    const entries = routes.hostsEntries();
+    const result = hostsMod.writeHostsBlock(entries);
+    await hostsMod.flushDns().catch(() => {});
+    return { hostsSynced: true, hostsChanged: result.changed, hostsPath: result.path };
+  } catch (e) {
+    return {
+      hostsSynced: false,
+      hostsError: e.message,
+      hostsHint: 'hosts 需管理员权限，请在「设置 → 系统集成」点「以管理员同步 hosts」',
+    };
   }
 }
 

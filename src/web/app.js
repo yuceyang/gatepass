@@ -96,9 +96,14 @@ async function loadRoutes() {
           const cell = tr.querySelector('.test-cell');
           cell.textContent = '测试中…';
           const res = await api(`/api/routes/${id}/test`, { method: 'POST' });
-          cell.innerHTML = res.ok
-            ? `<span class="badge ok">${res.status || 'OK'}</span>`
-            : `<span class="badge err">${esc(res.error || res.status || '失败')}</span>`;
+          if (res.ok && !res.authRedirect) {
+            cell.innerHTML = `<span class="badge ok">${res.status || 'OK'}</span>`;
+          } else if (res.authRedirect) {
+            cell.innerHTML = `<span class="badge warn">302 登录跳转</span>`;
+            alert('测试返回登录跳转，鉴权未生效。请检查会话状态，或确认 hosts 已同步后从浏览器访问验证。');
+          } else {
+            cell.innerHTML = `<span class="badge err">${esc(res.error || res.status || '失败')}</span>`;
+          }
         }
       } catch (e) {
         alert(e.message);
@@ -135,12 +140,19 @@ $('#route-form').addEventListener('submit', async (e) => {
     enabled: f.enabled.checked,
   };
   try {
+    let saved;
     if (routeEditingId) {
-      await api('/api/routes/' + routeEditingId, { method: 'PUT', body: JSON.stringify(body) });
+      saved = await api('/api/routes/' + routeEditingId, { method: 'PUT', body: JSON.stringify(body) });
     } else {
-      await api('/api/routes', { method: 'POST', body: JSON.stringify(body) });
+      saved = await api('/api/routes', { method: 'POST', body: JSON.stringify(body) });
     }
     $('#route-form-panel').classList.add('hidden');
+    if (saved && saved._hosts && saved._hosts.hostsSynced === false) {
+      alert('路由已保存，但 hosts 同步失败：' + (saved._hosts.hostsError || '') +
+        '\n\n请到「设置 → 系统集成」点「以管理员同步 hosts」，否则浏览器不会经过代理。');
+    } else if (saved && saved._hosts && saved._hosts.hostsSynced) {
+      // hosts 已自动同步
+    }
     loadRoutes();
   } catch (err) {
     alert(err.message);
