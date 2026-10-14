@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 
 /**
  * 开机自启：按平台安装/卸载。
- * Windows —— 启动文件夹快捷方式（powershell -WindowStyle Hidden 跑 gatepass start）
+ * Windows —— 启动文件夹 gatepass-start.vbs（WScript.Shell.Run window=0，完全隐藏）
  * macOS   —— ~/Library/LaunchAgents/com.gatepass.agent.plist
  * Linux   —— ~/.config/autostart/gatepass.desktop（桌面会话）或提示 systemd
  */
@@ -18,10 +18,10 @@ export function autostartPaths() {
   switch (process.platform) {
     case 'win32':
       return {
-        kind: 'shortcut-dir',
+        kind: 'vbs',
         dir: path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'),
           'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'),
-        file: 'gatepass-start.bat',
+        file: 'gatepass-start.vbs',
       };
     case 'darwin':
       return {
@@ -64,9 +64,19 @@ export async function installAutostart() {
   const exe = gatepassExe();
 
   if (process.platform === 'win32') {
-    // .bat 隐藏窗口启动
-    const body = `@echo off\r\nstart "" /min "${exe.file}" ${exe.args.join(' ')}\r\n`;
+    // VBS 隐藏窗口启动：window style 0 = 不留任何窗口
+    // VBS 里用 "" 转义双引号（不能用 JSON.stringify 的 \\"）
+    const cmd = `"${exe.file}" ${exe.args.join(' ')}`;
+    const vbsCmd = cmd.replace(/"/g, '""');
+    const body =
+      'Set sh = CreateObject("WScript.Shell")\r\n' +
+      `sh.Run "${vbsCmd}", 0, False\r\n`;
     fs.writeFileSync(target, body, 'utf8');
+    // 清理旧的 bat 自启文件
+    const legacy = path.join(p.dir, 'gatepass-start.bat');
+    if (fs.existsSync(legacy)) {
+      try { fs.unlinkSync(legacy); } catch { /* ignore */ }
+    }
   } else if (process.platform === 'darwin') {
     const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
