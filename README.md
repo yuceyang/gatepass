@@ -61,7 +61,7 @@ node -v     # v18.x 或更高
 ### 从源码安装
 
 ```bash
-git clone https://github.com/<you>/gatepass.git
+git clone https://github.com/yuceyang/gatepass.git
 cd gatepass
 npm install
 npm install -g .        # 全局安装，提供 gatepass 命令
