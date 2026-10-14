@@ -3,7 +3,7 @@ feature: gatepass
 status: delivered
 updated: 2026-10-14
 branch: feature/web-console
-commits: 0000000..pending
+commits: 059807f
 ---
 
 # GatePass — 免重复登录的网关反向代理
