@@ -27,6 +27,7 @@ function renderBlock(entries) {
 
 /**
  * 幂等写入/替换 hosts 标记块。
+ * 兼容旧 ugdocker-proxy 标记块（一并替换，避免双块并存）。
  * @param {Array<{ip:string,host:string,comment?:string}>} entries
  * @returns {{path:string, content:string, changed:boolean}}
  */
@@ -39,14 +40,20 @@ export function writeHostsBlock(entries) {
     content = '';
   }
   const block = renderBlock(entries);
-  const re = new RegExp(`${BEGIN}[\\s\\S]*?${END}`, 'g');
-  const next = re.test(content)
-    ? content.replace(re, block)
-    : content.replace(/\s*$/, '') + '\n\n' + block + '\n';
+  // 同时清理历史遗留的 ugdocker-proxy 块
+  const reNew = new RegExp(`${BEGIN}[\\s\\S]*?${END}`, 'g');
+  const reLegacy = /# ===== ugdocker-proxy BEGIN =====[\s\S]*?# ===== ugdocker-proxy END =====/g;
+  let next = content.replace(reNew, block);
+  if (next === content && reLegacy.test(content)) {
+    reLegacy.lastIndex = 0;
+    next = content.replace(reLegacy, block);
+  }
+  if (next === content) {
+    next = content.replace(/\s*$/, '') + '\n\n' + block + '\n';
+  }
 
   const changed = next !== content;
   if (changed) {
-    // 共享读写，规避被占用
     const fd = fs.openSync(p, 'r+');
     try {
       fs.ftruncateSync(fd, 0);
