@@ -123,9 +123,9 @@ export async function tryElevatedHostsWrite(blockContent) {
     blockContent,
     `'@`,
     `$t=[System.IO.File]::ReadAllText($p)`,
-    `$t=[regex]::Replace($t,'(?s)# gatepass begin[\\s\\S]*?# gatepass end', '')`,
-    `$t=[regex]::Replace($t,'(?s)# ===== ugdocker-proxy BEGIN =====[\\s\\S]*?# ===== ugdocker-proxy END =====', '')`,
-    `$t=$t.TrimEnd()+"${nl}${nl}"+$c.Trim()+"${nl}"`,
+    // 只改写 gatepass 标记块
+    `if ($t -match '# gatepass begin') { $t=[regex]::Replace($t,'(?s)# gatepass begin[\\s\\S]*?# gatepass end', $c.Trim()) }`,
+    `else { $t=$t.TrimEnd()+"${nl}${nl}"+$c.Trim()+"${nl}" }`,
     `$enc=New-Object System.Text.UTF8Encoding($false)`,
     `[System.IO.File]::WriteAllText($p,$t,$enc)`,
     `ipconfig /flushdns`,

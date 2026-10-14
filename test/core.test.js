@@ -45,6 +45,16 @@ test('routes: CRUD 与匹配', () => {
   assert.equal(rr.list().length, 0);
 });
 
+test('routes: 主机名/上游主机去端口去协议', () => {
+  const rr = new RouteRegistry();
+  const r = rr.add({ host: 'https://app-8888-x.y.z:8888/#/lock', upstreamHost: 'app-8888-x.y.z:8888' });
+  assert.equal(r.host, 'app-8888-x.y.z');
+  assert.equal(r.upstreamHost, 'app-8888-x.y.z');
+  assert.equal(r.upstreamPort, '8888');
+  assert.throws(() => rr.add({ host: 'bad_host!' }), /非法主机名/);
+  assert.throws(() => rr.add({ host: 'app-1-x.y.z', upstreamHost: 'not a host!' }), /非法上游主机名/);
+});
+
 test('routes: 热更新回调', () => {
   let called = 0;
   const rr = new RouteRegistry({ onChange: () => called++ });

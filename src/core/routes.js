@@ -26,11 +26,15 @@ export class RouteRegistry {
   }
 
   normalize(input) {
-    const host = String(input.host || '')
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, '')
-      .replace(/\/.*$/, '');
+    // 去掉协议、路径、端口，只留主机名
+    const cleanHost = (h) =>
+      String(h || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/\/.*$/, '')
+        .replace(/:\d+$/, '');
+    const host = cleanHost(input.host);
     if (!host || !HOST_RE.test(host)) {
       throw new Error(`非法主机名: ${input.host}`);
     }
@@ -38,11 +42,15 @@ export class RouteRegistry {
     if (!upstreamPort || !/^\d+$/.test(upstreamPort)) {
       throw new Error(`无法确定上游端口: ${host}`);
     }
+    const upstreamHost = input.upstreamHost ? cleanHost(input.upstreamHost) : host;
+    if (!upstreamHost || !HOST_RE.test(upstreamHost)) {
+      throw new Error(`非法上游主机名: ${input.upstreamHost}`);
+    }
     return {
       id: input.id || crypto.randomUUID(),
       host,
-      upstreamHost: input.upstreamHost || host,
       // upstreamPort：网关后的应用端口（dockerToken 用）；TCP 上游端口见 upstreamConnectPort（默认 443）
+      upstreamHost,
       upstreamPort,
       upstreamConnectPort: input.upstreamConnectPort || '',
       providerId: input.providerId || 'ugos',

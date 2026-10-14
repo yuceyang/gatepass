@@ -29,7 +29,7 @@ function renderBlock(entries) {
 
 /**
  * 幂等写入/替换 hosts 标记块。
- * 兼容旧 ugdocker-proxy 标记块（一并替换，避免双块并存）。
+ * 只改写 # gatepass begin…end 之间的内容，不动文件其它部分。
  * @param {Array<{ip:string,host:string,comment?:string}>} entries
  * @returns {{path:string, content:string, changed:boolean}}
  */
@@ -42,15 +42,11 @@ export function writeHostsBlock(entries) {
     content = '';
   }
   const block = renderBlock(entries);
-  // 同时清理历史遗留的 ugdocker-proxy 块
-  const reNew = new RegExp(`${BEGIN}[\\s\\S]*?${END}`, 'g');
-  const reLegacy = /# ===== ugdocker-proxy BEGIN =====[\s\S]*?# ===== ugdocker-proxy END =====/g;
-  let next = content.replace(reNew, block);
-  if (next === content && reLegacy.test(content)) {
-    reLegacy.lastIndex = 0;
-    next = content.replace(reLegacy, block);
-  }
-  if (next === content) {
+  const re = new RegExp(`${BEGIN}[\\s\\S]*?${END}`);
+  let next;
+  if (re.test(content)) {
+    next = content.replace(re, block);
+  } else {
     next = content.replace(/\s*$/, '') + '\n\n' + block + '\n';
   }
 
@@ -117,9 +113,9 @@ export function elevatedWriteCommand(entries) {
     block,
     `'@`,
     `$t=[System.IO.File]::ReadAllText($p)`,
-    `$t=[regex]::Replace($t,'(?s)# gatepass begin[\\s\\S]*?# gatepass end','')`,
-    `$t=[regex]::Replace($t,'(?s)# ===== ugdocker-proxy BEGIN =====[\\s\\S]*?# ===== ugdocker-proxy END =====','')`,
-    `$t=$t.TrimEnd()+"${nl}${nl}"+$c.Trim()+"${nl}"`,
+    // 只改写 gatepass 标记块，不动文件其它内容
+    `if ($t -match '# gatepass begin') { $t=[regex]::Replace($t,'(?s)# gatepass begin[\\s\\S]*?# gatepass end', $c.Trim()) }`,
+    `else { $t=$t.TrimEnd()+"${nl}${nl}"+$c.Trim()+"${nl}" }`,
     `$enc=New-Object System.Text.UTF8Encoding($false)`,
     `[System.IO.File]::WriteAllText($p,$t,$enc)`,
     `ipconfig /flushdns`,
