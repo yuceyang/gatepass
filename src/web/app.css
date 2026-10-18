@@ -91,6 +91,30 @@ main { padding: 20px; max-width: 1200px; margin: 0 auto; }
 .table th { color: var(--muted); font-weight: 500; }
 .table tbody tr:hover { background: #1c242e; }
 
+/* 可拖动调节列宽 */
+table.resizable { table-layout: fixed; }
+th.resizable { position: relative; }
+th.resizable .resizer {
+  position: absolute;
+  right: -3px;
+  top: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 2;
+}
+th.resizable .resizer:hover { background: rgba(77, 163, 255, 0.3); }
+td.url {
+  font-family: ui-monospace, Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.table td.s2xx { color: var(--ok); }
+.table td.s3xx { color: var(--warn); }
+.table td.s4xx, .table td.s5xx { color: var(--err); }
+
 button, .btn {
   background: #222b35;
   color: var(--text);
@@ -153,6 +177,7 @@ button:hover { filter: brightness(1.1); }
   white-space: pre-wrap;
 }
 .hint { color: var(--muted); font-size: 12px; }
+.hint.warn { color: var(--warn); }
 .hidden { display: none !important; }
 .badge {
   display: inline-block;

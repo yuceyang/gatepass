@@ -22,8 +22,24 @@
     <section id="page-overview" class="page active">
       <div class="cards" id="status-cards"></div>
       <div class="panel">
+        <h2>代理控制</h2>
+        <div class="actions">
+          <button id="btn-engine-restart" class="primary">重启代理</button>
+          <button id="btn-engine-stop" class="danger">停止代理</button>
+        </div>
+        <p class="hint" id="engine-hint">加载中…</p>
+      </div>
+      <div class="panel">
         <h2>最近请求</h2>
-        <div id="recent-logs" class="log-list small"></div>
+        <table class="table resizable" id="recent-table">
+          <colgroup>
+            <col style="width: 80px"><col style="width: 70px"><col style="width: 420px"><col style="width: 70px"><col style="width: 80px">
+          </colgroup>
+          <thead>
+            <tr><th>时间</th><th>方法</th><th>请求地址</th><th>状态</th><th>耗时</th></tr>
+          </thead>
+          <tbody id="recent-logs"></tbody>
+        </table>
       </div>
     </section>
 
@@ -36,7 +52,7 @@
         <table class="table" id="route-table">
           <thead>
             <tr>
-              <th>主机名</th><th>上游</th><th>Provider</th><th>启用</th><th>状态</th><th>操作</th>
+              <th>主机名</th><th>上游</th><th>Provider</th><th>启用</th><th>HTTP</th><th>状态</th><th>操作</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -57,6 +73,18 @@
           </label>
           <label>备注 <input name="note" /></label>
           <label class="row"><input type="checkbox" name="enabled" checked /> 启用</label>
+          <label class="row"><input type="checkbox" name="http" /> 纯 HTTP 访问（供不接受自签证书的客户端）</label>
+          <label class="row"><input type="checkbox" name="proxy" /> 正向代理（如 Mihomo / Clash 代理）</label>
+          <label>代理端口 <input name="proxyPort" placeholder="留空自动 = 18000 + 应用端口（7890 → 25890）" /></label>
+          <p class="hint">
+            正向代理：把本机这个端口当作 HTTP/HTTPS 代理，转发到上游代理（Mihomo/Clash）。
+            用法：在浏览器或工具里把代理设为 <code>http://127.0.0.1:&lt;端口&gt;</code>。
+            <strong>注意</strong>：HTTP 站点可正常代理；HTTPS 站点依赖 CONNECT 隧道，若上游网关（如绿联 uglink 反向代理）不支持 CONNECT 字节转发，HTTPS 代理会失败。
+          </p>
+          <p class="hint warn" id="proxy-warn" style="display:none">
+            ⚠️ HTTPS 站点（CONNECT 隧道）经绿联 uglink 反向代理通常无法使用：网关在 CONNECT 握手后会断开字节流。
+            仅 HTTP 站点可正常代理；需要 HTTPS 请改用局域网直连或支持 TCP 转发的隧道（frp / ngrok tcp）。
+          </p>
           <div class="actions">
             <button type="submit" class="primary">保存</button>
             <button type="button" id="btn-cancel-route">取消</button>
@@ -74,7 +102,10 @@
             <button id="btn-clear-logs">清空</button>
           </div>
         </div>
-        <table class="table" id="log-table">
+        <table class="table resizable" id="log-table">
+          <colgroup>
+            <col style="width: 80px"><col style="width: 70px"><col style="width: 230px"><col style="width: 250px"><col style="width: 70px"><col style="width: 80px">
+          </colgroup>
           <thead>
             <tr><th>时间</th><th>方法</th><th>主机</th><th>路径</th><th>状态</th><th>耗时</th></tr>
           </thead>
@@ -108,6 +139,7 @@
         <div class="actions">
           <button id="btn-sync-hosts">同步 hosts</button>
           <button id="btn-sync-hosts-admin" class="primary">以管理员同步 hosts</button>
+          <button id="btn-restore-hosts" class="danger">恢复 hosts（移除标记块）</button>
           <a class="btn" href="/api/ca" download="gatepass-ca.crt">下载 CA 证书</a>
         </div>
         <pre id="hosts-block" class="code"></pre>

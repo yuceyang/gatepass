@@ -29,7 +29,8 @@ const DEFAULTS = {
   // 控制台监听
   console: { host: '127.0.0.1', port: 19099 },
   // 代理监听：必须 443，浏览器/扩展默认走标准 HTTPS 端口
-  proxy: { host: '127.0.0.1', port: 443, insecureUpstreamTls: true },
+  // httpPort：额外开启一个纯 HTTP 监听（默认 null 关闭），供不接受自签证书的客户端使用
+  proxy: { host: '127.0.0.1', port: 443, insecureUpstreamTls: true, httpPort: null },
   // 鉴权提供者
   provider: {
     id: 'ugos',

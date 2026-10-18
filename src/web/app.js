@@ -4,6 +4,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 let ws = null;
 let routeEditingId = null;
+let httpPort = null;
 
 // ---------- 页面切换 ----------
 $$('.nav-btn').forEach((btn) => {
@@ -33,12 +34,15 @@ async function api(path, opts = {}) {
 async function loadStatus() {
   try {
     const s = await api('/api/status');
+    httpPort = s.proxy?.httpPort || null;
     const p = s.provider || {};
     const sess = p.session || {};
     const cards = [
-      { k: '代理监听', v: s.engine?.listening ? `${s.proxy?.host}:${s.proxy?.port}` : '未监听', cls: s.engine?.listening ? 'ok' : 'err' },
+      { k: 'HTTPS 代理', v: s.engine?.listening ? `${s.proxy?.host}:${s.proxy?.port}` : '未监听', cls: s.engine?.listening ? 'ok' : 'err' },
+      { k: 'HTTP 代理', v: s.engine?.httpListening ? `${s.proxy?.host}:${s.proxy?.httpPort}` : (s.proxy?.httpPort ? '未监听' : '未开启'), cls: s.engine?.httpListening ? 'ok' : '' },
       { k: '会话状态', v: sess.ok ? '已登录' : '未登录', cls: sess.ok ? 'ok' : 'err' },
       { k: '路由数', v: `${s.routesEnabled}/${s.routes} 启用`, cls: '' },
+      { k: 'HTTP 路由', v: `${s.routesHttp ?? 0} 个`, cls: (s.routesHttp || 0) > 0 ? 'ok' : '' },
       { k: '已代理请求', v: s.engine?.proxied ?? 0, cls: '' },
       { k: '重登次数', v: s.engine?.retries ?? 0, cls: (s.engine?.retries || 0) > 0 ? 'warn' : '' },
       { k: '错误数', v: s.engine?.errors ?? 0, cls: (s.engine?.errors || 0) > 0 ? 'err' : 'ok' },
@@ -46,6 +50,11 @@ async function loadStatus() {
     $('#status-cards').innerHTML = cards
       .map((c) => `<div class="card"><div class="k">${c.k}</div><div class="v ${c.cls}">${c.v}</div></div>`)
       .join('');
+    const httpLine = s.proxy?.httpPort
+      ? `  |  HTTP http://${s.proxy?.host}:${s.proxy?.httpPort}`
+      : '  |  HTTP 未开启（在设置里配置 httpPort）';
+    $('#engine-hint').textContent =
+      `控制台 http://${s.console?.host}:${s.console?.port}  |  HTTPS https://${s.proxy?.host}:${s.proxy?.port}${httpLine}`;
   } catch (e) {
     $('#status-cards').innerHTML = `<div class="card"><div class="k">错误</div><div class="v err">${e.message}</div></div>`;
   }
@@ -59,15 +68,17 @@ async function loadRoutes() {
     .map(
       (r) => `
     <tr data-id="${r.id}">
-      <td>${esc(r.host)}</td>
+      <td>${esc(r.host)}${r.proxy ? `<div class="hint" style="margin-top:2px">代理 http://127.0.0.1:${esc(r.proxyPort)}</div>` : ''}</td>
       <td>${esc(r.upstreamHost || r.host)}:${esc(r.upstreamPort)}</td>
       <td><span class="badge">${esc(r.providerId)}</span></td>
       <td>${r.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge">停用</span>'}</td>
+      <td>${r.http ? `<span class="badge ok" title="http://${esc(r.host)}:${httpPort || '?'}">纯HTTP</span>` : '<span class="badge">—</span>'}</td>
       <td class="test-cell">—</td>
       <td>
         <button data-act="test">测试</button>
         <button data-act="edit">编辑</button>
         <button data-act="toggle">${r.enabled ? '停用' : '启用'}</button>
+        <button data-act="http">${r.http ? '关HTTP' : '开HTTP'}</button>
         <button data-act="del" class="danger">删除</button>
       </td>
     </tr>`
@@ -92,6 +103,10 @@ async function loadRoutes() {
           const r = list.find((x) => x.id === id);
           await api('/api/routes/' + id, { method: 'PATCH', body: JSON.stringify({ enabled: !r.enabled }) });
           loadRoutes();
+        } else if (act === 'http') {
+          const r = list.find((x) => x.id === id);
+          await api('/api/routes/' + id, { method: 'PATCH', body: JSON.stringify({ http: !r.http }) });
+          loadRoutes();
         } else if (act === 'test') {
           const cell = tr.querySelector('.test-cell');
           cell.textContent = '测试中…';
@@ -108,6 +123,12 @@ async function loadRoutes() {
   });
 }
 
+function updateProxyWarn() {
+  const warn = $('#proxy-warn');
+  if (!warn) return;
+  warn.style.display = $('#route-form').proxy?.checked ? '' : 'none';
+}
+
 function showRouteForm(r = null) {
   routeEditingId = r?.id || null;
   $('#route-form-title').textContent = r ? '编辑路由' : '添加路由';
@@ -118,11 +139,16 @@ function showRouteForm(r = null) {
   f.providerId.value = r?.providerId || 'ugos';
   f.note.value = r?.note || '';
   f.enabled.checked = r?.enabled !== false;
+  f.http.checked = r?.http === true;
+  f.proxy.checked = r?.proxy === true;
+  f.proxyPort.value = r?.proxyPort || '';
+  updateProxyWarn();
   $('#route-form-panel').classList.remove('hidden');
 }
 
 $('#btn-add-route').addEventListener('click', () => showRouteForm());
 $('#btn-cancel-route').addEventListener('click', () => $('#route-form-panel').classList.add('hidden'));
+$('#route-form [name=proxy]')?.addEventListener('change', updateProxyWarn);
 
 $('#route-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -134,6 +160,9 @@ $('#route-form').addEventListener('submit', async (e) => {
     providerId: f.providerId.value,
     note: f.note.value.trim(),
     enabled: f.enabled.checked,
+    http: f.http.checked,
+    proxy: f.proxy.checked,
+    proxyPort: f.proxyPort.value.trim() || undefined,
   };
   try {
     let saved;
@@ -169,7 +198,8 @@ function statusClass(s) {
 }
 function logRow(e, small = false) {
   if (small) {
-    return `<div class="log-item"><span>${fmtTime(e.ts)}</span><span>${e.method}</span><span class="path">${esc(e.host + e.path)}</span><span class="${statusClass(e.status)}">${e.status}</span><span>${e.durationMs}ms</span></div>`;
+    const url = e.url || `${e.proto || 'https'}://${e.host}${e.path}`;
+    return `<tr><td>${fmtTime(e.ts)}</td><td>${e.method}</td><td class="url" title="${esc(url)}">${esc(url)}</td><td class="${statusClass(e.status)}">${e.status}</td><td>${e.durationMs}ms</td></tr>`;
   }
   return `<tr><td>${fmtTime(e.ts)}</td><td>${e.method}</td><td>${esc(e.host)}</td><td>${esc(e.path)}</td><td class="${statusClass(e.status)}">${e.status}</td><td>${e.durationMs}ms</td></tr>`;
 }
@@ -189,9 +219,9 @@ function pushLog(e) {
     while (tb.children.length > 500) tb.removeChild(tb.lastChild);
   }
   const recent = $('#recent-logs');
-  const div = document.createElement('div');
-  div.innerHTML = logRow(e, true);
-  recent.prepend(div.firstElementChild);
+  const rbody = document.createElement('tbody');
+  rbody.innerHTML = logRow(e, true);
+  recent.prepend(rbody.firstElementChild);
   while (recent.children.length > 50) recent.removeChild(recent.lastChild);
 }
 
@@ -337,6 +367,39 @@ $('#btn-proxy-off').addEventListener('click', async () => {
   }
 });
 
+// ---------- 代理控制（重启 / 停止 / 恢复 hosts） ----------
+$('#btn-engine-restart').addEventListener('click', async () => {
+  try {
+    await api('/api/engine/restart', { method: 'POST' });
+    alert('代理已重启');
+    loadStatus();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+$('#btn-engine-stop').addEventListener('click', async () => {
+  if (!confirm('确定停止代理？停止后需点「重启代理」恢复，控制台仍可用。')) return;
+  try {
+    await api('/api/engine/stop', { method: 'POST' });
+    alert('代理已停止');
+    loadStatus();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+$('#btn-restore-hosts').addEventListener('click', async () => {
+  if (!confirm('确定移除 GatePass 写入的 hosts 标记块？移除后应用域名将不再指向本机代理。')) return;
+  try {
+    const r = await api('/api/hosts/restore', { method: 'POST' });
+    alert(r.changed ? 'hosts 标记块已移除' : 'hosts 无 GatePass 标记块');
+    loadSettings();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
 // ---------- WebSocket（带轮询兜底） ----------
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -396,7 +459,43 @@ function testBadge(res) {
   return `<span class="badge err" title="上游错误">${s || '?'}</span>`;
 }
 
+// ---------- 可拖动调节列宽 ----------
+function makeResizableTable(table) {
+  if (!table) return;
+  const cols = table.querySelectorAll('colgroup col');
+  const ths = table.querySelectorAll('thead th');
+  ths.forEach((th, i) => {
+    th.classList.add('resizable');
+    const handle = document.createElement('div');
+    handle.className = 'resizer';
+    th.appendChild(handle);
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const col = cols[i];
+      const startX = e.clientX;
+      const startW = col ? col.getBoundingClientRect().width : th.getBoundingClientRect().width;
+      const onMove = (ev) => {
+        const w = Math.max(40, startW + (ev.clientX - startX));
+        if (col) col.style.width = w + 'px';
+        else th.style.width = w + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+  });
+}
+
 // ---------- 启动 ----------
+makeResizableTable($('#log-table'));
+makeResizableTable($('#recent-table'));
 loadStatus();
 loadRoutes();
 loadLogsOnce();

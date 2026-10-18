@@ -75,6 +75,18 @@ export async function start(opts = {}) {
     throw e;
   }
 
+  // 代理 HTTP（可选）：纯 HTTP 监听，供不接受自签证书的客户端（如 Rust/cc-switch）使用
+  if (config.proxy.httpPort) {
+    try {
+      await engine.listenHttp(config.proxy.httpPort, config.proxy.host);
+    } catch (e) {
+      log(`[gatepass] HTTP 监听 ${config.proxy.httpPort} 失败: ${e.message}`);
+    }
+  }
+
+  // 正向代理监听（代理型路由的专用端口）
+  await engine.syncProxyListeners();
+
   // 控制台 HTTP
   const consoleServer = createConsoleServer({
     provider,
@@ -92,6 +104,9 @@ export async function start(opts = {}) {
   });
   log(`[gatepass] 控制台 http://${config.console.host}:${config.console.port}`);
   log(`[gatepass] 代理   https://${config.proxy.host}:${config.proxy.port}  →  *.${config.provider?.domainSuffix}`);
+  if (config.proxy.httpPort) {
+    log(`[gatepass] 代理   http://${config.proxy.host}:${config.proxy.httpPort}  →  *.${config.provider?.domainSuffix}`);
+  }
 
   // 启动预登录（失败不退出）
   provider.ensureSession().then(

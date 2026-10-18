@@ -46,6 +46,8 @@ export class RouteRegistry {
     if (!upstreamHost || !HOST_RE.test(upstreamHost)) {
       throw new Error(`非法上游主机名: ${input.upstreamHost}`);
     }
+    // 正向代理（如 Mihomo/Clash）：本机开一个专用端口，转发 CONNECT/绝对 URL 请求
+    const proxy = input.proxy === true;
     return {
       id: input.id || crypto.randomUUID(),
       host,
@@ -55,6 +57,12 @@ export class RouteRegistry {
       upstreamConnectPort: input.upstreamConnectPort || '',
       providerId: input.providerId || 'ugos',
       enabled: input.enabled !== false,
+      // http：是否允许走纯 HTTP 监听（默认 false，仅 HTTPS 可访问）
+      http: input.http === true,
+      proxy,
+      proxyPort: proxy
+        ? String(input.proxyPort || '').trim() || String(18000 + Number(upstreamPort))
+        : '',
       note: input.note || '',
     };
   }

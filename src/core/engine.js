@@ -64,6 +64,9 @@ export class Engine {
     };
 
     this.httpsServer = null;
+    this.httpServer = null;
+    /** @type {Map<string, import('node:http').Server>} proxyPort → 正向代理监听 */
+    this.proxyServers = new Map();
   }
 
   async resolveUpstream(hostname) {
@@ -77,7 +80,7 @@ export class Engine {
   /** 启动 HTTPS 监听，返回 server */
   async listen(port, host = '127.0.0.1') {
     this.httpsServer = https.createServer({ key: this.certs.key, cert: this.certs.cert }, (req, res) =>
-      this.handle(req, res)
+      this.handle(req, res, false)
     );
     this.httpsServer.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head));
     this.httpsServer.on('clientError', (err, socket) => {
@@ -93,12 +96,57 @@ export class Engine {
     return this.httpsServer;
   }
 
+  /** 启动纯 HTTP 监听（不接受自签证书的客户端走这里），返回 server */
+  async listenHttp(port, host = '127.0.0.1') {
+    this.httpServer = http.createServer((req, res) => this.handle(req, res, true));
+    this.httpServer.on('upgrade', (req, socket, head) => this.handleUpgrade(req, socket, head));
+    this.httpServer.on('clientError', (err, socket) => {
+      this.stats.errors++;
+      if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+      void err;
+    });
+    await new Promise((resolve, reject) => {
+      this.httpServer.once('error', reject);
+      this.httpServer.listen(port, host, resolve);
+    });
+    this.log(`[engine] HTTP 监听 ${host}:${port}`);
+    return this.httpServer;
+  }
+
+  /** 停止所有代理监听（HTTPS + HTTP + 正向代理），控制台不受影响 */
+  async stop() {
+    if (this.httpsServer) {
+      await new Promise((r) => this.httpsServer.close(r));
+      this.httpsServer = null;
+    }
+    if (this.httpServer) {
+      await new Promise((r) => this.httpServer.close(r));
+      this.httpServer = null;
+    }
+    for (const [port, server] of this.proxyServers) {
+      await new Promise((r) => server.close(r));
+      this.proxyServers.delete(port);
+    }
+    this.log('[engine] 代理监听已停止');
+  }
+
+  /** 用当前配置重新监听（应用 httpPort / port 等改动） */
+  async restart() {
+    await this.stop();
+    await this.listen(this.proxy.port, this.proxy.host);
+    if (this.proxy.httpPort) {
+      await this.listenHttp(this.proxy.httpPort, this.proxy.host);
+    }
+    await this.syncProxyListeners();
+  }
+
   async close() {
-    if (this.httpsServer) await new Promise((r) => this.httpsServer.close(r));
+    await this.stop();
     this.upstreamAgent.destroy();
   }
 
-  async handle(req, res) {
+  async handle(req, res, isHttp = false) {
+    req._gpIsHttp = isHttp;
     const t0 = Date.now();
     const hostHeader = String(req.headers.host || '');
     const hostname = hostHeader.split(':')[0].toLowerCase();
@@ -111,9 +159,13 @@ export class Engine {
       return;
     }
 
-    if (!route) {
+    if (!route || (isHttp && !route.http)) {
       res.writeHead(421, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(`GatePass: no route for host ${hostname}`);
+      res.end(
+        !route
+          ? `GatePass: no route for host ${hostname}`
+          : `GatePass: HTTP 未启用 for host ${hostname}`
+      );
       this.emitRequest(req, res, t0, null, 421);
       return;
     }
@@ -253,15 +305,152 @@ export class Engine {
     }
   }
 
+  /** 正向代理：绝对 URL 请求（HTTP 代理），复用 forward 转发到上游代理 */
+  forwardProxy(req, res, route) {
+    req._gpIsHttp = true;
+    this.forward(req, res, route, true, Date.now());
+  }
+
+  /** 正向代理：CONNECT 隧道（HTTPS 代理） */
+  async handleConnect(req, clientSocket, head, route) {
+    req._gpIsHttp = true;
+    const t0 = Date.now();
+    const hostname = route.host;
+    const target = String(req.url || '');
+    try {
+      await this.provider.ensureSession();
+      const injected = await this.provider.applyToRequest(
+        { headers: { ...req.headers }, path: req.url },
+        route
+      );
+      const headers = { ...injected.headers };
+      headers.host = route.upstreamHost || hostname;
+      for (const h of HOP_BY_HOP) delete headers[h];
+
+      const realIp = await this.resolveUpstream(route.upstreamHost || hostname);
+      const upstream = tls.connect(
+        {
+          host: realIp,
+          port: Number(route.upstreamConnectPort || 443),
+          servername: route.upstreamHost || hostname,
+          rejectUnauthorized: !this.insecureUpstreamTls,
+        },
+        () => {
+          if (head?.length) clientSocket.unshift(head);
+          const lines = [
+            `CONNECT ${target} HTTP/1.1`,
+            ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`),
+            '',
+            '',
+          ].join('\r\n');
+          upstream.write(lines);
+
+          let buf = Buffer.alloc(0);
+          const onData = (chunk) => {
+            buf = Buffer.concat([buf, chunk]);
+            const idx = buf.indexOf('\r\n\r\n');
+            if (idx === -1) return;
+            upstream.off('data', onData);
+            const headText = buf.slice(0, idx).toString('utf8');
+            const ok = /^HTTP\/1\.[01]\s+200\b/i.test(headText);
+            if (!ok) {
+              const code = Number(headText.match(/ (\d{3}) /)?.[1]) || 502;
+              clientSocket.write(headText + '\r\n\r\n');
+              clientSocket.end();
+              upstream.destroy();
+              this.emitRequest(req, clientSocket, t0, route, code);
+              return;
+            }
+            clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+            const rest = buf.slice(idx + 4);
+            if (rest.length) clientSocket.write(rest);
+            upstream.pipe(clientSocket);
+            clientSocket.pipe(upstream);
+            this.emitRequest(req, clientSocket, t0, route, 200);
+          };
+          upstream.on('data', onData);
+          upstream.on('error', (e) => {
+            this.log(`[engine] CONNECT 上游错误 ${target}: ${e.message}`);
+            clientSocket.destroy();
+          });
+          upstream.on('close', () => {
+            this.log(`[engine] CONNECT 上游关闭 ${target}`);
+            clientSocket.destroy();
+          });
+          clientSocket.on('error', (e) => {
+            this.log(`[engine] CONNECT 客户端错误 ${target}: ${e.message}`);
+            upstream.destroy();
+          });
+          clientSocket.on('close', () => {
+            this.log(`[engine] CONNECT 客户端关闭 ${target}`);
+            upstream.destroy();
+          });
+          this.log(`[engine] CONNECT 隧道建立 ${target}`);
+        }
+      );
+      upstream.on('error', () => clientSocket.destroy());
+    } catch (e) {
+      this.stats.errors++;
+      this.log(`[engine] CONNECT ${target} 失败: ${e.message}`);
+      if (clientSocket.writable) clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+      this.emitRequest(req, clientSocket, t0, route, 502);
+    }
+  }
+
+  /** 按当前路由表同步正向代理监听（代理路由增删改后调用） */
+  async syncProxyListeners() {
+    const host = this.proxy.host || '127.0.0.1';
+    const wanted = new Map();
+    for (const r of this.routes.list()) {
+      if (r.enabled && r.proxy && r.proxyPort) wanted.set(String(r.proxyPort), r);
+    }
+    // 关闭不再需要的
+    for (const [port, server] of this.proxyServers) {
+      if (!wanted.has(port)) {
+        await new Promise((res) => server.close(res));
+        this.proxyServers.delete(port);
+        this.log(`[engine] 关闭正向代理监听 ${host}:${port}`);
+      }
+    }
+    // 打开新增的
+    for (const [port, route] of wanted) {
+      if (this.proxyServers.has(port)) continue;
+      const server = http.createServer((req, res) => this.forwardProxy(req, res, route));
+      server.on('connect', (req, socket, head) => this.handleConnect(req, socket, head, route));
+      server.on('clientError', (err, socket) => {
+        if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+        void err;
+      });
+      try {
+        await new Promise((resolve, reject) => {
+          server.once('error', reject);
+          server.listen(Number(port), host, resolve);
+        });
+        this.proxyServers.set(port, server);
+        this.log(`[engine] 正向代理监听 http://${host}:${port} → ${route.host}`);
+      } catch (e) {
+        this.log(`[engine] 正向代理 ${host}:${port} 监听失败: ${e.message}`);
+      }
+    }
+  }
+
   emitRequest(req, res, t0, route, status) {
     const durationMs = Date.now() - t0;
-    const host = String(req.headers.host || '').split(':')[0];
+    const hostHeader = String(req.headers.host || '');
+    const host = hostHeader.split(':')[0];
+    const proto = req._gpIsHttp ? 'http' : 'https';
+    const url =
+      req.method === 'CONNECT'
+        ? `${proto}://${hostHeader}` // CONNECT 的目标就是 host:port
+        : `${proto}://${hostHeader}${req.url}`;
     this.onEvent({
       type: 'request',
       ts: Date.now(),
       method: req.method,
       path: req.url,
       host,
+      url,
+      proto,
       routeId: route?.id || null,
       status,
       durationMs,

@@ -163,10 +163,16 @@ export function createConsoleServer(deps) {
     try {
       if (p === '/api/status' && req.method === 'GET') {
         return json(res, 200, {
-          engine: { ...engine?.stats, listening: !!engine?.httpsServer?.listening },
+          engine: {
+            ...engine?.stats,
+            listening: !!engine?.httpsServer?.listening,
+            httpListening: !!engine?.httpServer?.listening,
+            proxyPorts: [...(engine?.proxyServers?.keys() || [])],
+          },
           provider: provider.describe(),
           routes: routes.list().length,
           routesEnabled: routes.list().filter((r) => r.enabled).length,
+          routesHttp: routes.list().filter((r) => r.enabled && r.http).length,
           liveBuffered: live.recent(100000).length,
           console: config.console,
           proxy: config.proxy,
@@ -182,6 +188,7 @@ export function createConsoleServer(deps) {
         const body = await readJson(req);
         const r = routes.add(body);
         persistRoutes();
+        await engine.syncProxyListeners();
         const hs = await syncHostsAfterChange(routes);
         return json(res, 201, { ...r, _hosts: hs });
       }
@@ -195,12 +202,14 @@ export function createConsoleServer(deps) {
         const body = await readJson(req);
         const r = routes.update(m[1], body);
         persistRoutes();
+        await engine.syncProxyListeners();
         const hs = await syncHostsAfterChange(routes);
         return json(res, 200, { ...r, _hosts: hs });
       }
       if (m && req.method === 'DELETE') {
         const ok = routes.remove(m[1]);
         persistRoutes();
+        await engine.syncProxyListeners();
         const hs = await syncHostsAfterChange(routes);
         return json(res, ok ? 200 : 404, { ok, _hosts: hs });
       }
@@ -267,6 +276,26 @@ export function createConsoleServer(deps) {
           autostartMod.launchElevatedHostsScript(wrap.script);
         }
         return json(res, 200, { ...wrap, manualCommand: `${cmd.command} ${cmd.args.join(' ')}`, manualNote: cmd.note });
+      }
+
+      if (p === '/api/engine/restart' && req.method === 'POST') {
+        await engine.restart();
+        return json(res, 200, {
+          ok: true,
+          listening: !!engine.httpsServer?.listening,
+          httpListening: !!engine.httpServer?.listening,
+        });
+      }
+      if (p === '/api/engine/stop' && req.method === 'POST') {
+        await engine.stop();
+        return json(res, 200, { ok: true, listening: false, httpListening: false });
+      }
+
+      if (p === '/api/hosts/restore' && req.method === 'POST') {
+        const hostsMod = await import('../system/hosts.js');
+        const result = hostsMod.removeHostsBlock();
+        await hostsMod.flushDns().catch(() => {});
+        return json(res, 200, { ok: true, ...result });
       }
 
       if (p === '/api/autostart' && req.method === 'GET') {
