@@ -262,6 +262,38 @@ export function createConsoleServer(deps) {
         return json(res, 200, { ok: true });
       }
 
+      // 可移植配置：与 Android / iOS 客户端共用的 JSON
+      if (p === '/api/config/export' && req.method === 'GET') {
+        const { toPortable } = await import('../core/portable.js');
+        const includePassword = url.searchParams.get('password') !== '0';
+        const portable = toPortable(
+          { provider: config.provider, routes: routes.list() },
+          { includePassword },
+        );
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Disposition': `attachment; filename="gatepass-config${includePassword ? '' : '-nopass'}.json"`,
+        });
+        res.end(JSON.stringify(portable, null, 2) + '\n');
+        return;
+      }
+      if (p === '/api/config/import' && req.method === 'POST') {
+        const body = await readJson(req);
+        const { parsePortable } = await import('../core/portable.js');
+        // Accept either a JSON document or the raw text of one.
+        const parsed = parsePortable(typeof body === 'string' ? body : JSON.stringify(body.portable ?? body));
+        Object.assign(config.provider, parsed.provider);
+        // Rebuild through the registry so upstreamPort is inferred consistently.
+        const result = routes.replaceAll(parsed.routes);
+        config.routes = routes.list();
+        saveConfig(config);
+        return json(res, 200, {
+          ok: true,
+          routes: config.routes.length,
+          skipped: result.skipped,
+        });
+      }
+
       if (p === '/api/hosts' && req.method === 'GET') {
         const hostsMod = await import('../system/hosts.js');
         return json(res, 200, { block: hostsMod.readHostsBlock() });

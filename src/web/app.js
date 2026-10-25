@@ -266,6 +266,44 @@ async function loadSettings() {
   loadPortProxy();
 }
 
+// ---------- 多终端配置 ----------
+function downloadConfig(includePassword) {
+  const url = `/api/config/export${includePassword ? '' : '?password=0'}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = includePassword ? 'gatepass-config.json' : 'gatepass-config-nopass.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+$('#btn-export-config').addEventListener('click', () => downloadConfig(true));
+$('#btn-export-config-nopass').addEventListener('click', () => downloadConfig(false));
+
+$('#btn-import-config').addEventListener('click', () => $('#file-import-config').click());
+
+$('#file-import-config').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch (err) {
+      throw new Error('文件不是合法 JSON');
+    }
+    const r = await api('/api/config/import', { method: 'POST', body: JSON.stringify(payload) });
+    const skipped = r.skipped && r.skipped.length ? `，跳过 ${r.skipped.length} 条` : '';
+    alert(`已导入 ${r.routes} 条路由${skipped}`);
+    location.reload();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    e.target.value = '';
+  }
+});
+
 $('#settings-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;

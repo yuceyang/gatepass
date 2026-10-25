@@ -108,6 +108,33 @@ export class RouteRegistry {
     return ok;
   }
 
+  /**
+   * Replaces the whole table in one go (used by config import).
+   * Entries are normalised, so upstreamPort is inferred the same way as for a manual add.
+   * @returns {{added:Array<object>, skipped:Array<{host:string, reason:string}>}}
+   */
+  replaceAll(inputs = []) {
+    const next = new Map();
+    const added = [];
+    const skipped = [];
+    for (const input of inputs) {
+      try {
+        const route = this.normalize(input);
+        if ([...next.values()].some((r) => r.host === route.host)) {
+          skipped.push({ host: route.host, reason: '主机重复' });
+          continue;
+        }
+        next.set(route.id, route);
+        added.push(route);
+      } catch (e) {
+        skipped.push({ host: input?.host, reason: e.message });
+      }
+    }
+    this.byId = next;
+    this.onChange(this.list());
+    return { added, skipped };
+  }
+
   setEnabled(id, enabled) {
     return this.update(id, { enabled: !!enabled });
   }

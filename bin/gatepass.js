@@ -273,18 +273,10 @@ async function cmdImport() {
   // instead of writing half-empty route objects straight from the portable file.
   const { RouteRegistry } = await import('../src/core/routes.js');
   const registry = new RouteRegistry();
-  for (const r of routes) {
-    try {
-      registry.add({
-        host: r.host,
-        enabled: r.enabled,
-        http: r.httpIngress === true,
-        providerId: provider.id,
-      });
-    } catch (e) {
-      log(`  跳过 ${r.host}: ${e.message}`);
-    }
-  }
+  const { skipped } = registry.replaceAll(
+    routes.map((r) => ({ host: r.host, enabled: r.enabled, http: r.httpIngress === true, providerId: provider.id })),
+  );
+  for (const s of skipped) log(`  跳过 ${s.host}: ${s.reason}`);
   cfg.routes = registry.list();
   saveConfig(cfg, configPath);
   log(`已导入: ${configPath}`);

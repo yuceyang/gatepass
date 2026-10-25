@@ -135,6 +135,21 @@
       </div>
 
       <div class="panel">
+        <h2>多终端配置</h2>
+        <p class="hint">
+          与 Android / iOS 客户端使用同一份 JSON，换设备不用重新填写。
+          只包含 NAS 地址、账号和路由；端口、开机自启等平台相关设置不导出。
+        </p>
+        <div class="actions">
+          <button id="btn-export-config" class="primary">导出配置</button>
+          <button id="btn-export-config-nopass">导出（不含密码）</button>
+          <button id="btn-import-config">导入配置…</button>
+          <input id="file-import-config" type="file" accept=".json,application/json" style="display:none" />
+        </div>
+        <pre id="portable-preview" class="code" style="display:none"></pre>
+      </div>
+
+      <div class="panel">
         <h2>系统集成</h2>
         <div class="actions">
           <button id="btn-sync-hosts">同步 hosts</button>
