@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isTermux, termuxIntegrationNotice } from '../system/termux.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.join(__dirname, '..', 'web');
@@ -176,6 +177,13 @@ export function createConsoleServer(deps) {
           liveBuffered: live.recent(100000).length,
           console: config.console,
           proxy: config.proxy,
+          platform: {
+            termux: isTermux(),
+            hostsSupported: !isTermux(),
+            systemCaSupported: !isTermux(),
+            autostartSupported: !isTermux(),
+            integrationNotice: isTermux() ? termuxIntegrationNotice() : null,
+          },
           onboardingDone: !!config.onboardingDone,
         });
       }
@@ -262,6 +270,7 @@ export function createConsoleServer(deps) {
         const hostsMod = await import('../system/hosts.js');
         const entries = routes.hostsEntries();
         const result = hostsMod.writeHostsBlock(entries);
+        if (result.supported === false) return json(res, 409, { ...result, error: result.reason, hostsSynced: false, hostsHint: result.reason });
         await hostsMod.flushDns();
         return json(res, 200, result);
       }
@@ -270,6 +279,7 @@ export function createConsoleServer(deps) {
         const autostartMod = await import('../system/autostart.js');
         const entries = routes.hostsEntries();
         const cmd = hostsMod.elevatedWriteCommand(entries);
+        if (cmd.supported === false) return json(res, 409, { ok: false, supported: false, error: cmd.note, note: cmd.note });
         const blockText = cmd.script || '';
         const wrap = await autostartMod.tryElevatedHostsWrite(blockText.match(/# gatepass begin[\s\S]*?# gatepass end/)?.[0] || '');
         if (wrap.ok && process.platform === 'win32') {
@@ -294,6 +304,7 @@ export function createConsoleServer(deps) {
       if (p === '/api/hosts/restore' && req.method === 'POST') {
         const hostsMod = await import('../system/hosts.js');
         const result = hostsMod.removeHostsBlock();
+        if (result.supported === false) return json(res, 409, { ...result, ok: false, error: result.reason });
         await hostsMod.flushDns().catch(() => {});
         return json(res, 200, { ok: true, ...result });
       }
@@ -302,8 +313,10 @@ export function createConsoleServer(deps) {
         const mod = await import('../system/autostart.js');
         return json(res, 200, {
           installed: mod.isAutostartInstalled(),
+          supported: !isTermux(),
+          note: isTermux() ? mod.autostartPaths().note : null,
           paths: mod.autostartPaths(),
-          platform: process.platform,
+          platform: isTermux() ? 'android-termux' : process.platform,
         });
       }
       if (p === '/api/autostart' && req.method === 'POST') {
@@ -324,6 +337,9 @@ export function createConsoleServer(deps) {
         });
       }
       if (p === '/api/portproxy' && req.method === 'POST') {
+        if (isTermux()) {
+          return json(res, 409, { supported: false, error: 'Termux 不支持 Windows netsh 端口转发。' });
+        }
         const mod = await import('../system/portproxy.js');
         const body = await readJson(req);
         const r = body.action === 'remove'
@@ -419,6 +435,9 @@ async function syncHostsAfterChange(routes) {
   try {
     const hostsMod = await import('../system/hosts.js');
     const result = hostsMod.writeHostsBlock(entries);
+    if (result.supported === false) {
+      return { hostsSynced: false, hostsHint: result.reason };
+    }
     await hostsMod.flushDns().catch(() => {});
     return { hostsSynced: true, hostsChanged: result.changed, hostsPath: result.path };
   } catch (e1) {

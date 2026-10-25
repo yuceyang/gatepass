@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isTermux, termuxIntegrationNotice } from './termux.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,7 +34,10 @@ function renderBlock(entries) {
  * @param {Array<{ip:string,host:string,comment?:string}>} entries
  * @returns {{path:string, content:string, changed:boolean}}
  */
-export function writeHostsBlock(entries) {
+export function writeHostsBlock(entries, options = {}) {
+  if (isTermux(options.platform || process.platform, options.env || process.env)) {
+    return { path: hostsPath(), content: '', changed: false, supported: false, reason: termuxIntegrationNotice() };
+  }
   const p = hostsPath();
   let content = '';
   try {
@@ -60,11 +64,14 @@ export function writeHostsBlock(entries) {
       fs.closeSync(fd);
     }
   }
-  return { path: p, content: next, changed };
+  return { path: p, content: next, changed, supported: true };
 }
 
 /** 移除标记块 */
-export function removeHostsBlock() {
+export function removeHostsBlock(options = {}) {
+  if (isTermux(options.platform || process.platform, options.env || process.env)) {
+    return { path: hostsPath(), changed: false, supported: false, reason: termuxIntegrationNotice() };
+  }
   const p = hostsPath();
   let content = '';
   try {
@@ -88,7 +95,8 @@ export function removeHostsBlock() {
 }
 
 /** 当前标记块内容（调试/展示用） */
-export function readHostsBlock() {
+export function readHostsBlock(options = {}) {
+  if (isTermux(options.platform || process.platform, options.env || process.env)) return '';
   try {
     const content = fs.readFileSync(hostsPath(), 'utf8');
     const m = content.match(new RegExp(`${BEGIN}[\\s\\S]*?${END}`));
@@ -102,7 +110,17 @@ export function readHostsBlock() {
  * 平台提权写 hosts 的命令（能力缺失时降级输出）。
  * @returns {{command:string, args:string[], shell:string, script:string, note:string}}
  */
-export function elevatedWriteCommand(entries) {
+export function elevatedWriteCommand(entries, options = {}) {
+  if (isTermux(options.platform || process.platform, options.env || process.env)) {
+    return {
+      shell: null,
+      command: null,
+      args: [],
+      script: '',
+      supported: false,
+      note: termuxIntegrationNotice(),
+    };
+  }
   const block = renderBlock(entries);
   const p = hostsPath();
   const nl = String.fromCharCode(13, 10);

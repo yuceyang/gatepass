@@ -38,7 +38,7 @@ GatePass 的做法是：**在本机提前完成身份鉴别**（登录 NAS、换
 - **本地 Web 控制台**：总览 / 路由管理 / 实时请求日志 / 设置
 - **提前鉴权**：配置账号密码后自动完成登录与令牌刷新，对上层程序透明
 - **路由热更新**：控制台加主机名即生效，自动同步系统 hosts（只改自己的标记块）
-- **跨平台**：Windows / macOS / Linux，x64 / arm64，Node.js ≥ 18
+- **跨平台**：Windows / macOS / Linux，x64 / arm64，Node.js ≥ 18；Termux 提供实验性无 root 运行支持
 - **一键系统配置**：自动 UAC 提权写 hosts、CA 证书导入、默认开机自启
 - **可观测**：每条请求的方法/路径/状态码/耗时，页面自动刷新
 
@@ -73,6 +73,39 @@ gatepass help
 ```bash
 npm install && npm start
 ```
+
+### Android / Termux（实验性，rootless）
+
+GatePass 的 Node.js 服务和本地控制台可在 Termux 中运行，但这**不等于普通 Android 应用安装包**，也不能在无 root 情况下透明接管 Android 的系统域名解析。
+
+```bash
+pkg update
+pkg install nodejs-lts git
+git clone https://github.com/yuceyang/gatepass.git
+cd gatepass
+npm install
+gatepass init
+gatepass start
+```
+
+`gatepass init` 在 Termux 首次创建配置时默认使用高位代理端口 `18443`（控制台默认 `19099`），避免普通应用身份无法监听 443。已有配置不会自动改端口；如仍配置为 443，请重新初始化或编辑 `$HOME/.config/gatepass/config.json` 中的 `proxy.port`。控制台默认只监听本机，可在手机浏览器打开 `http://127.0.0.1:19099`。
+
+**重要限制：**
+
+- Termux 不能修改 Android 系统 hosts/DNS，因此 GatePass 无法让普通应用自动把 NAS 应用域名解析到本机代理。需要另行配置 Android 兼容的 DNS/VPN 方案，或使用支持自定义解析/连接目标的客户端；域名解析到本机后，使用 `18443` 时 URL 还需显式带上代理端口。GatePass 本身不提供 VPN/DNS 接管功能。
+- `gatepass sync-hosts` 和桌面开机自启在 Termux 中不可用；相关按钮会禁用或给出提示。可通过 Termux:Boot 自行启动，例如安装并首次打开 Termux:Boot 后，在 `~/.termux/boot/gatepass.sh` 放置启动脚本：
+
+  ```sh
+  #!/data/data/com.termux/files/usr/bin/sh
+  termux-wake-lock
+  gatepass start
+  ```
+
+  然后执行 `chmod +x ~/.termux/boot/gatepass.sh`。如需 `termux-wake-lock`，还要安装 Termux:API 应用并运行 `pkg install termux-api`。Android 电池优化仍可能影响后台进程。
+- `gatepass trust-ca` 会给出 Android 手动导入提示，不会运行 Linux 的 `update-ca-certificates`。可在控制台下载 CA，再从 Android「设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书」导入；这只安装用户 CA，Android 7 及以上的应用可选择不信任用户 CA，是否生效取决于应用。
+- GatePass 配置包含 NAS 账号密码，CA 私钥保存在配置目录。保护好 Termux 用户数据，不要把配置目录或 `certs/proxy.key` 分享出去。
+
+目前没有 Android 设备/模拟器端到端验证，Termux 支持属于实验性运行支持，不承诺完整 Android 浏览器或应用兼容性。
 
 ---
 

@@ -8,6 +8,7 @@ import { LiveLog, createConsoleServer } from './server/api.js';
 import { ensureCerts } from './system/certs.js';
 import { writeHostsBlock, flushDns } from './system/hosts.js';
 import { isCommonPort, commonPortWarning } from './system/certtrust.js';
+import { isTermux, termuxIntegrationNotice } from './system/termux.js';
 
 /**
  * 启动 GatePass（代理引擎 + 控制台）。
@@ -61,6 +62,9 @@ export async function start(opts = {}) {
   try {
     await engine.listen(config.proxy.port, config.proxy.host);
   } catch (e) {
+    if (e.code === 'EACCES' && isTermux() && config.proxy.port < 1024) {
+      throw new Error(`Termux 普通用户不能监听端口 ${config.proxy.port}。请运行 gatepass init 选择 1024 以上端口（如 18443），或编辑 ${configPath}`);
+    }
     if (e.code === 'EACCES' || e.code === 'EADDRINUSE') {
       // 绑不上 443：自动请求管理员重启（用户只点一次 UAC）
       const { isElevated, relaunchElevated } = await import('./system/elevate.js');
@@ -127,24 +131,28 @@ export async function start(opts = {}) {
     }
   }
 
-  // 同步 hosts（失败仅提示；未提权则自动请求 UAC）
-  try {
-    const entries = routes.hostsEntries();
-    if (entries.length) {
-      const r = writeHostsBlock(entries);
-      await flushDns();
-      log(`[gatepass] hosts ${r.changed ? '已更新' : '无变化'}（${entries.length} 条）`);
-    }
-  } catch (e) {
-    log(`[gatepass] hosts 写入失败: ${e.message}`);
-    if (process.platform === 'win32') {
-      const { runElevatedPowerShell } = await import('./system/elevate.js');
-      const { elevatedWriteCommand } = await import('./system/hosts.js');
-      const cmdObj = elevatedWriteCommand(routes.hostsEntries());
-      const r2 = runElevatedPowerShell(cmdObj.script);
-      log(`[gatepass] ${r2.note}`);
-    } else {
-      log(`[gatepass] 可在控制台「设置 → 系统集成」查看待写入内容`);
+  // 同步 hosts（Termux 无法修改 Android 系统 DNS/hosts）
+  if (isTermux()) {
+    log(`[gatepass] hosts 未同步: ${termuxIntegrationNotice()}`);
+  } else {
+    try {
+      const entries = routes.hostsEntries();
+      if (entries.length) {
+        const r = writeHostsBlock(entries);
+        await flushDns();
+        log(`[gatepass] hosts ${r.changed ? '已更新' : '无变化'}（${entries.length} 条）`);
+      }
+    } catch (e) {
+      log(`[gatepass] hosts 写入失败: ${e.message}`);
+      if (process.platform === 'win32') {
+        const { runElevatedPowerShell } = await import('./system/elevate.js');
+        const { elevatedWriteCommand } = await import('./system/hosts.js');
+        const cmdObj = elevatedWriteCommand(routes.hostsEntries());
+        const r2 = runElevatedPowerShell(cmdObj.script);
+        log(`[gatepass] ${r2.note}`);
+      } else {
+        log(`[gatepass] 可在控制台「设置 → 系统集成」查看待写入内容`);
+      }
     }
   }
 

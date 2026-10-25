@@ -255,6 +255,13 @@ async function loadSettings() {
   f.domainSuffix.value = s.provider?.domainSuffix || '';
   const hosts = await api('/api/hosts');
   $('#hosts-block').textContent = hosts.block || '(尚未同步)';
+  const status = await api('/api/status');
+  if (status.platform?.termux) {
+    $('#hosts-hint').textContent = status.platform.integrationNotice;
+    $('#btn-sync-hosts').disabled = true;
+    $('#btn-sync-hosts-admin').disabled = true;
+    $('#btn-restore-hosts').disabled = true;
+  }
   loadAutostart();
   loadPortProxy();
 }
@@ -306,6 +313,12 @@ $('#btn-sync-hosts-admin').addEventListener('click', async () => {
 async function loadAutostart() {
   try {
     const s = await api('/api/autostart');
+    $('#btn-autostart-on').disabled = s.supported === false;
+    $('#btn-autostart-off').disabled = s.supported === false;
+    if (s.supported === false) {
+      $('#autostart-hint').textContent = s.note || '当前平台不支持开机自启。';
+      return;
+    }
     $('#autostart-hint').textContent = s.installed
       ? `已启用开机自启（${s.paths.dir}）。下次开机会自动运行代理。`
       : '当前未启用开机自启。init 默认已装，如被移除可点「安装开机自启」。';
@@ -316,8 +329,8 @@ async function loadAutostart() {
 
 $('#btn-autostart-on').addEventListener('click', async () => {
   try {
-    await api('/api/autostart', { method: 'POST', body: JSON.stringify({ action: 'install' }) });
-    alert('已安装开机自启');
+    const r = await api('/api/autostart', { method: 'POST', body: JSON.stringify({ action: 'install' }) });
+    alert(r.ok ? '已安装开机自启' : (r.note || '安装开机自启失败'));
     loadAutostart();
   } catch (err) {
     alert(err.message);
@@ -326,8 +339,8 @@ $('#btn-autostart-on').addEventListener('click', async () => {
 
 $('#btn-autostart-off').addEventListener('click', async () => {
   try {
-    await api('/api/autostart', { method: 'POST', body: JSON.stringify({ action: 'remove' }) });
-    alert('已移除开机自启');
+    const r = await api('/api/autostart', { method: 'POST', body: JSON.stringify({ action: 'remove' }) });
+    alert(r.supported === false ? (r.note || '当前平台不支持开机自启。') : (r.removed ? '已移除开机自启' : '未安装开机自启'));
     loadAutostart();
   } catch (err) {
     alert(err.message);
@@ -337,6 +350,8 @@ $('#btn-autostart-off').addEventListener('click', async () => {
 async function loadPortProxy() {
   try {
     const s = await api('/api/portproxy');
+    $('#btn-proxy-on').disabled = s.supported === false;
+    $('#btn-proxy-off').disabled = s.supported === false;
     const lines = (s.entries || []).join('\n') || '(未配置)';
     const st = s.installed ? '已启用' : '未启用';
     $('#portproxy-hint').textContent =

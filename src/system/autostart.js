@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isTermux, termuxAutostartNotice } from './termux.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -13,7 +14,12 @@ const execFileAsync = promisify(execFile);
  * macOS   —— ~/Library/LaunchAgents/com.gatepass.agent.plist
  * Linux   —— ~/.config/autostart/gatepass.desktop（桌面会话）或提示 systemd
  */
-export function autostartPaths() {
+export function autostartPaths(options = {}) {
+  const platform = options.platform || process.platform;
+  const env = options.env || process.env;
+  if (isTermux(platform, env)) {
+    return { kind: 'unsupported', dir: null, file: null, note: termuxAutostartNotice() };
+  }
   const home = os.homedir();
   switch (process.platform) {
     case 'win32':
@@ -52,13 +58,17 @@ function gatepassExe() {
   return { file: process.execPath, args: [localBin, 'start'], shell: false };
 }
 
-export function isAutostartInstalled() {
-  const p = autostartPaths();
+export function isAutostartInstalled(options = {}) {
+  if (isTermux(options.platform || process.platform, options.env || process.env)) return false;
+  const p = autostartPaths(options);
   return fs.existsSync(path.join(p.dir, p.file));
 }
 
-export async function installAutostart() {
-  const p = autostartPaths();
+export async function installAutostart(options = {}) {
+  if (isTermux(options.platform || process.platform, options.env || process.env)) {
+    return { ok: false, supported: false, installed: false, note: termuxAutostartNotice() };
+  }
+  const p = autostartPaths(options);
   fs.mkdirSync(p.dir, { recursive: true });
   const target = path.join(p.dir, p.file);
   const exe = gatepassExe();
@@ -106,8 +116,11 @@ X-GNOME-Autostart-enabled=true
   return { ok: true, path: target };
 }
 
-export async function removeAutostart() {
-  const p = autostartPaths();
+export async function removeAutostart(options = {}) {
+  if (isTermux(options.platform || process.platform, options.env || process.env)) {
+    return { ok: false, supported: false, removed: false, note: termuxAutostartNotice() };
+  }
+  const p = autostartPaths(options);
   const target = path.join(p.dir, p.file);
   if (!fs.existsSync(target)) return { ok: true, removed: false, path: target };
   if (process.platform === 'darwin') {

@@ -2,22 +2,25 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
-import { loadConfig, saveConfig, defaultConfigPath, defaultConfigDir } from '../src/config.js';
+import { loadConfig, saveConfig, defaultConfigPath, defaultConfigDir, defaultProxyPort } from '../src/config.js';
 import { start } from '../src/index.js';
 import { ensureCerts } from '../src/system/certs.js';
 import { writeHostsBlock, flushDns, elevatedWriteCommand, readHostsBlock } from '../src/system/hosts.js';
 import { trustCaCommand, checkPortFree } from '../src/system/certtrust.js';
 import { isElevated, relaunchElevated } from '../src/system/elevate.js';
+import { isTermux, termuxIntegrationNotice } from '../src/system/termux.js';
 
 const [, , cmd = 'help', ...rest] = process.argv;
 
 const HELP = `GatePass — 免重复登录的网关反向代理
 
 用法:
-  gatepass init             首次向导（生成配置/证书，引导 hosts 与 CA 信任）
+  gatepass init             首次向导（生成配置/证书；Termux 默认使用高位端口）
   gatepass start            启动代理 + Web 控制台
   gatepass status           查看配置路径与端口
-  gatepass sync-hosts       按当前路由同步系统 hosts
+  gatepass export [文件]    导出可移植配置（PC / Android / iOS 通用）
+  gatepass import <文件>    从可移植配置导入（覆盖账号与路由）
+  gatepass sync-hosts       按当前路由同步系统 hosts（Termux 不支持）
   gatepass print-hosts      打印待写入的 hosts 块
   gatepass trust-ca         打印/尝试导入 CA 证书
   gatepass install-autostart   安装开机自启
@@ -42,7 +45,7 @@ async function init() {
   const password = await ask('密码');
   const domainSuffix = await ask('代理域名后缀（如 yuceyang.cn68.ugdocker.link）');
   const routeHost = await ask('首个路由主机名（如 app-5006-yuceyang.cn68.ugdocker.link，可留空稍后在控制台添加）');
-  const proxyPort = await ask('代理端口（默认 443，浏览器/扩展需标准 HTTPS 端口）', '443');
+  const proxyPort = await ask(`代理端口（默认 ${defaultProxyPort()}）`, String(defaultProxyPort()));
   const consolePort = await ask('控制台端口（建议非常用端口，如 19099）', '19099');
 
   const configPath = defaultConfigPath();
@@ -55,7 +58,7 @@ async function init() {
     password,
     domainSuffix,
   };
-  config.proxy = { ...config.proxy, port: Number(proxyPort) || 443 };
+  config.proxy = { ...config.proxy, port: Number(proxyPort) || defaultProxyPort() };
   config.console = { ...config.console, port: Number(consolePort) || 19099 };
   // 常见端口提醒
   const { isCommonPort, commonPortWarning } = await import('../src/system/certtrust.js');
@@ -96,8 +99,12 @@ async function init() {
   });
   log(`[3/5] 证书: ${certs.certPath}`);
   const trust = trustCaCommand(certs.caPath);
-  log(`      导入 CA（${trust.note}）:`);
-  log(`      ${trust.command} ${trust.args.join(' ')}`);
+  if (trust.supported === false) {
+    log(`      ${trust.note}`);
+  } else {
+    log(`      导入 CA（${trust.note}）:`);
+    log(`      ${trust.command} ${trust.args.join(' ')}`);
+  }
 
   // hosts
   const entries = config.routes.filter((r) => r.enabled !== false).map((r) => ({ ip: '127.0.0.1', host: r.host, comment: 'gatepass' }));
@@ -107,8 +114,13 @@ async function init() {
   } else {
     try {
       const r = writeHostsBlock(entries);
-      await flushDns();
-      log(`      已写入 ${r.path}`);
+      if (r.supported === false) {
+        log(`      未同步: ${r.reason}`);
+        for (const entry of entries) log(`      ${entry.ip}\t${entry.host}`);
+      } else {
+        await flushDns();
+        log(`      已写入 ${r.path}`);
+      }
     } catch (e) {
       log(`      写入失败: ${e.message}`);
       if (process.platform === 'win32') {
@@ -130,8 +142,12 @@ async function init() {
   try {
     const { installAutostart } = await import('../src/system/autostart.js');
     const ar = await installAutostart();
-    log(`      已安装: ${ar.path}`);
-    log('      （可在控制台「设置 → 开机自启」随时关闭）');
+    if (ar.supported === false) {
+      log(`      ${ar.note}`);
+    } else {
+      log(`      已安装: ${ar.path}`);
+      log('      （可在控制台「设置 → 开机自启」随时关闭）');
+    }
   } catch (e) {
     log(`      安装失败: ${e.message}`);
     log('      也可稍后在控制台「设置」一键安装');
@@ -154,7 +170,8 @@ async function cmdStatus() {
   }
   log('CA/证书目录:', path.join(path.dirname(configPath), 'certs'));
   const block = readHostsBlock();
-  log('hosts 标记块:', block ? '已写入' : '未写入');
+  log('hosts 标记块:', isTermux() ? 'Termux 不支持系统 hosts' : (block ? '已写入' : '未写入'));
+  if (isTermux()) log('系统集成限制:', termuxIntegrationNotice());
 }
 
 async function cmdSyncHosts() {
@@ -178,6 +195,10 @@ async function cmdSyncHosts() {
   }
   try {
     const r = writeHostsBlock(entries);
+    if (r.supported === false) {
+      log('hosts 未同步:', r.reason);
+      return;
+    }
     await flushDns();
     log(r.changed ? 'hosts 已更新' : 'hosts 无变化');
   } catch (e) {
@@ -192,7 +213,9 @@ function cmdPrintHosts() {
   const cfg = loadConfig();
   const entries = (cfg.routes || []).filter((r) => r.enabled !== false).map((r) => ({ ip: '127.0.0.1', host: r.host, comment: 'gatepass' }));
   const c = elevatedWriteCommand(entries);
-  log('# 将以下内容追加到系统 hosts（' + c.note + '）:');
+  log(isTermux()
+    ? '# 仅输出路由主机名；Termux 无法改 Android 系统 hosts。'
+    : '# 将以下内容追加到系统 hosts（' + c.note + '）:');
   log('');
   for (const e of entries) log(`${e.ip}\t${e.host}`);
 }
@@ -206,8 +229,68 @@ function cmdTrustCa() {
   }
   const t = trustCaCommand(caPath);
   log('CA 路径:', caPath);
-  log('导入命令（' + t.note + '）:');
-  log(t.command, t.args.join(' '));
+  if (t.supported === false) {
+    log(t.note);
+  } else {
+    log('导入命令（' + t.note + '）:');
+    log(t.command, t.args.join(' '));
+  }
+}
+
+async function cmdExport() {
+  const { toPortable } = await import('../src/core/portable.js');
+  const cfg = loadConfig();
+  const portable = toPortable(cfg);
+  const target = rest[0] || path.join(process.cwd(), 'gatepass-config.json');
+  fs.writeFileSync(target, JSON.stringify(portable, null, 2) + '\n', 'utf8');
+  log(`已导出可移植配置: ${target}`);
+  log(`  账号: ${portable.provider.username || '(未设置)'} @ ${portable.provider.authBase || '(未设置)'}`);
+  log(`  路由: ${portable.routes.length} 条`);
+  if (portable.provider.password) {
+    log('  注意: 文件包含明文密码，请妥善保管，不要提交到仓库或公开分享。');
+  }
+  log('  可在 Android / iOS 客户端的「导入配置」中直接使用。');
+}
+
+async function cmdImport() {
+  const { parsePortable } = await import('../src/core/portable.js');
+  const source = rest[0];
+  if (!source) {
+    log('用法: gatepass import <配置文件路径>');
+    process.exitCode = 1;
+    return;
+  }
+  if (!fs.existsSync(source)) {
+    log(`文件不存在: ${source}`);
+    process.exitCode = 1;
+    return;
+  }
+  const { provider, routes } = parsePortable(fs.readFileSync(source, 'utf8'));
+  const configPath = defaultConfigPath();
+  const cfg = loadConfig(configPath);
+  cfg.provider = { ...cfg.provider, ...provider };
+  // Rebuild routes through the registry so upstreamPort is inferred and defaults are applied,
+  // instead of writing half-empty route objects straight from the portable file.
+  const { RouteRegistry } = await import('../src/core/routes.js');
+  const registry = new RouteRegistry();
+  for (const r of routes) {
+    try {
+      registry.add({
+        host: r.host,
+        enabled: r.enabled,
+        http: r.httpIngress === true,
+        providerId: provider.id,
+      });
+    } catch (e) {
+      log(`  跳过 ${r.host}: ${e.message}`);
+    }
+  }
+  cfg.routes = registry.list();
+  saveConfig(cfg, configPath);
+  log(`已导入: ${configPath}`);
+  log(`  账号: ${provider.username || '(未设置)'} @ ${provider.authBase}`);
+  log(`  路由: ${routes.length} 条`);
+  log('  如代理正在运行，请重启 gatepass start 使新配置生效。');
 }
 
 async function main() {
@@ -231,6 +314,12 @@ async function main() {
     case 'status':
       await cmdStatus();
       break;
+    case 'export':
+      await cmdExport();
+      break;
+    case 'import':
+      await cmdImport();
+      break;
     case 'sync-hosts':
       await cmdSyncHosts();
       break;
@@ -243,13 +332,13 @@ async function main() {
     case 'install-autostart': {
       const mod = await import('../src/system/autostart.js');
       const r = await mod.installAutostart();
-      log('开机自启已安装:', r.path);
+      log(r.supported === false ? r.note : `开机自启已安装: ${r.path}`);
       break;
     }
     case 'remove-autostart': {
       const mod = await import('../src/system/autostart.js');
       const r = await mod.removeAutostart();
-      log(r.removed ? '开机自启已移除' : '未安装开机自启', r.path);
+      log(r.supported === false ? r.note : (r.removed ? '开机自启已移除' : '未安装开机自启'), r.path || '');
       break;
     }
     case 'help':

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isTermux } from './termux.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -13,9 +14,20 @@ const execFileAsync = promisify(execFile);
  * @param {string} caPath ca.crt 路径
  * @returns {{platform:string, command:string, args:string[], note:string}}
  */
-export function trustCaCommand(caPath) {
+export function trustCaCommand(caPath, options = {}) {
   const abs = path.resolve(caPath);
-  switch (process.platform) {
+  const platform = options.platform || process.platform;
+  const env = options.env || process.env;
+  if (isTermux(platform, env)) {
+    return {
+      platform: 'android',
+      command: null,
+      args: [],
+      supported: false,
+      note: `不能从 Termux 安装 Android 系统 CA。可将 ${abs} 下载/复制到手机，在 Android「设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书」中手动导入；部分应用不会信任用户 CA。Node.js 客户端可设置 NODE_EXTRA_CA_CERTS=${abs}。`,
+    };
+  }
+  switch (platform) {
     case 'win32':
       return {
         platform: 'win32',
@@ -41,12 +53,14 @@ export function trustCaCommand(caPath) {
 }
 
 /** 尝试执行 CA 信任（可能因权限失败，失败不算错误） */
-export async function tryTrustCa(caPath) {
-  const cmd = trustCaCommand(caPath);
+export async function tryTrustCa(caPath, options = {}) {
+  const cmd = trustCaCommand(caPath, options);
+  if (cmd.supported === false) return { ok: false, supported: false, command: cmd, note: cmd.note };
+  const platform = options.platform || process.platform;
   try {
-    if (process.platform === 'win32') {
+    if (platform === 'win32') {
       await execFileAsync(cmd.command, cmd.args, { windowsHide: true });
-    } else if (process.platform === 'darwin') {
+    } else if (platform === 'darwin') {
       await execFileAsync(cmd.command, cmd.args);
     } else {
       await execFileAsync('cp', [caPath, '/usr/local/share/ca-certificates/gatepass-ca.crt']);
