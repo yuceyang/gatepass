@@ -71,7 +71,7 @@ export function fromPortable(raw) {
       httpIngress: item.httpIngress !== false,
     });
   }
-  return { provider, routes };
+  return { provider, routes, hasPassword: String(p.password || '').length > 0 };
 }
 
 /** Parses a portable config from JSON text. */

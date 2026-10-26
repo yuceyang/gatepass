@@ -259,6 +259,9 @@ export function createConsoleServer(deps) {
         if (body.proxy) Object.assign(config.proxy, body.proxy);
         if (body.onboardingDone !== undefined) config.onboardingDone = !!body.onboardingDone;
         saveConfig(config);
+        // Push the edit into the running provider, otherwise it keeps the credentials it was
+        // constructed with and every request fails until the process restarts.
+        provider.applyConfig?.(config.provider);
         return json(res, 200, { ok: true });
       }
 
@@ -282,11 +285,16 @@ export function createConsoleServer(deps) {
         const { parsePortable } = await import('../core/portable.js');
         // Accept either a JSON document or the raw text of one.
         const parsed = parsePortable(typeof body === 'string' ? body : JSON.stringify(body.portable ?? body));
-        Object.assign(config.provider, parsed.provider);
+        // A password-less export (or one from another device) must not wipe the password
+        // already stored here — that would silently break the session.
+        const incoming = { ...parsed.provider };
+        if (!parsed.hasPassword) delete incoming.password;
+        Object.assign(config.provider, incoming);
         // Rebuild through the registry so upstreamPort is inferred consistently.
         const result = routes.replaceAll(parsed.routes);
         config.routes = routes.list();
         saveConfig(config);
+        provider.applyConfig?.(config.provider);
         return json(res, 200, {
           ok: true,
           routes: config.routes.length,

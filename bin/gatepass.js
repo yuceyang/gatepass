@@ -265,10 +265,15 @@ async function cmdImport() {
     process.exitCode = 1;
     return;
   }
-  const { provider, routes } = parsePortable(fs.readFileSync(source, 'utf8'));
+  const parsed = parsePortable(fs.readFileSync(source, 'utf8'));
+  const { provider, routes } = parsed;
   const configPath = defaultConfigPath();
   const cfg = loadConfig(configPath);
-  cfg.provider = { ...cfg.provider, ...provider };
+  // Keep the locally stored password when the file does not carry one (it was exported
+  // without a password, or comes from another device).
+  const merged = { ...provider };
+  if (parsed.hasPassword === false) delete merged.password;
+  cfg.provider = { ...cfg.provider, ...merged };
   // Rebuild routes through the registry so upstreamPort is inferred and defaults are applied,
   // instead of writing half-empty route objects straight from the portable file.
   const { RouteRegistry } = await import('../src/core/routes.js');

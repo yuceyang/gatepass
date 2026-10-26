@@ -50,6 +50,19 @@ async function loadStatus() {
     $('#status-cards').innerHTML = cards
       .map((c) => `<div class="card"><div class="k">${c.k}</div><div class="v ${c.cls}">${c.v}</div></div>`)
       .join('');
+
+    // A bare "未登录" hides the common cause: credentials never configured.
+    const readiness = p.readiness || {};
+    if (readiness.ok === false) {
+      const hint = document.getElementById('provider-readiness');
+      if (hint) {
+        hint.textContent = `⚠ ${readiness.reason}`;
+        hint.style.display = '';
+      }
+    } else {
+      const hint = document.getElementById('provider-readiness');
+      if (hint) hint.style.display = 'none';
+    }
     const httpLine = s.proxy?.httpPort
       ? `  |  HTTP http://${s.proxy?.host}:${s.proxy?.httpPort}`
       : '  |  HTTP 未开启（在设置里配置 httpPort）';

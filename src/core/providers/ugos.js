@@ -106,6 +106,36 @@ export class UgosProvider {
     this.stats = { logins: 0, loginFailures: 0, gatewayTokens: 0 };
   }
 
+  /**
+   * Applies edited credentials at runtime so the console does not need a restart.
+   *
+   * The constructor copies its fields, so mutating the config object alone left this provider
+   * holding stale (often empty) credentials — which is why a freshly imported password kept
+   * failing with "未配置账号密码" until the process was restarted.
+   *
+   * @returns {boolean} true when anything changed, meaning the cached session is now stale.
+   */
+  applyConfig(opts = {}) {
+    const next = {
+      authBase: String(opts.authBase ?? this.authBase).replace(/\/$/, ''),
+      username: opts.username ?? this.username,
+      password: opts.password ?? this.password,
+    };
+    const changed =
+      next.authBase !== this.authBase ||
+      next.username !== this.username ||
+      next.password !== this.password;
+    Object.assign(this, next);
+    if (changed) {
+      // Credentials changed: drop everything derived from the old ones.
+      this.session = null;
+      this._loginPromise = null;
+      this.gatewayTokens.clear();
+      this.stats.loginFailures = 0;
+    }
+    return changed;
+  }
+
   async ensureSession(force = false) {
     if (!force && this.session?.token && Date.now() < (this.session.expiresAt || 0)) {
       return { ok: true, expiresAt: this.session.expiresAt, detail: '已登录' };
@@ -243,6 +273,10 @@ export class UgosProvider {
       session: this.session
         ? { ok: true, expiresAt: this.session.expiresAt, hasToken: !!this.session.token }
         : { ok: false },
+      // Surface *why* login is failing instead of leaving a bare stats counter.
+      readiness: !this.username || !this.password
+        ? { ok: false, reason: '未配置账号密码，请在设置中填写后保存' }
+        : { ok: true },
       gatewayTokens: [...this.gatewayTokens.entries()].map(([host, v]) => ({
         host,
         expiresAt: v.expiresAt,
