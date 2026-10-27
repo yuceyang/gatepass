@@ -74,14 +74,26 @@ export async function installAutostart(options = {}) {
   const exe = gatepassExe();
 
   if (process.platform === 'win32') {
-    // VBS 隐藏窗口启动：window style 0 = 不留任何窗口
-    // VBS 里用 "" 转义双引号（不能用 JSON.stringify 的 \\"）
-    const cmd = `"${exe.file}" ${exe.args.join(' ')}`;
-    const vbsCmd = cmd.replace(/"/g, '""');
-    const body =
+    // 隐藏启动的代价是没有输出，失败时无从排查。拆成两个文件：
+    //   gatepass-start.cmd —— 真正运行，把输出重定向到日志
+    //   gatepass-start.vbs —— 以 window style 0 静默调用上面的 cmd，不留窗口
+    const logPath = path.join(p.dir, 'gatepass-start.log');
+    const cmdPath = path.join(p.dir, 'gatepass-start.cmd');
+    const runLine = `"${exe.file}" ${exe.args.join(' ')}`;
+    const cmdBody = [
+      '@echo off',
+      'chcp 65001 >nul 2>&1',
+      `echo [%date% %time%] starting gatepass >> "${logPath}"`,
+      `${runLine} >> "${logPath}" 2>&1`,
+      `echo [%date% %time%] exited with %ERRORLEVEL% >> "${logPath}"`,
+      '',
+    ].join('\r\n');
+    fs.writeFileSync(cmdPath, cmdBody, 'utf8');
+
+    const vbsBody =
       'Set sh = CreateObject("WScript.Shell")\r\n' +
-      `sh.Run "${vbsCmd}", 0, False\r\n`;
-    fs.writeFileSync(target, body, 'utf8');
+      `sh.Run """${cmdPath}""", 0, False\r\n`;
+    fs.writeFileSync(target, vbsBody, 'utf8');
     // 清理旧的 bat 自启文件
     const legacy = path.join(p.dir, 'gatepass-start.bat');
     if (fs.existsSync(legacy)) {
