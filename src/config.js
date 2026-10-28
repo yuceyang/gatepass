@@ -35,10 +35,16 @@ const DEFAULTS = {
   // 鉴权提供者
   provider: {
     id: 'ugos',
-    authBase: 'https://yuceyang.cn68.ug.link',
+    // UGREENlink 别名（ug.link/<alias>）。远程访问的后缀会随设备重新注册而变化，
+    // 所以只记别名，实际登录地址在运行时向 UGREENlink 查询。
+    alias: '',
+    // 手动指定的登录地址（可选）。留空则按别名自动解析；
+    // 填写后只在 alias 查询失败时作为兜底。
+    authBase: '',
     username: '',
     password: '',
     keepalive: true,
+    // 代理域名后缀 —— 决定本机 hosts / 证书覆盖哪些主机名，是固定值，不随远程后缀变化。
     domainSuffix: 'yuceyang.cn68.ugdocker.link',
   },
   // 路由表

@@ -5,6 +5,8 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 let ws = null;
 let routeEditingId = null;
 let httpPort = null;
+/** Cached fixed proxy suffix, used to preview/auto-build route hostnames. */
+let routeSuffix = '';
 
 // ---------- 页面切换 ----------
 $$('.nav-btn').forEach((btn) => {
@@ -147,6 +149,8 @@ function showRouteForm(r = null) {
   $('#route-form-title').textContent = r ? '编辑路由' : '添加路由';
   const f = $('#route-form');
   f.host.value = r?.host || '';
+  // Prefer the explicit port; fall back to parsing it out of an existing hostname.
+  f.port.value = r?.upstreamPort || (r?.host?.match(/^app-?(\d+)/i)?.[1] ?? '');
   f.upstreamPort.value = r?.upstreamPort || '';
   f.upstreamHost.value = r?.upstreamHost || '';
   f.providerId.value = r?.providerId || 'ugos';
@@ -156,19 +160,55 @@ function showRouteForm(r = null) {
   f.proxy.checked = r?.proxy === true;
   f.proxyPort.value = r?.proxyPort || '';
   updateProxyWarn();
+  updateRoutePreview();
   $('#route-form-panel').classList.remove('hidden');
+}
+
+/** Shows the hostname that will be generated from the port + configured suffix. */
+async function updateRoutePreview() {
+  const f = $('#route-form');
+  const el = $('#route-preview');
+  if (!el) return;
+  const port = f.port.value.trim().replace(/^app-?/i, '');
+  if (!port) {
+    el.textContent = '填写应用端口后，这里会显示将生成的主机名。';
+    return;
+  }
+  if (!routeSuffix) {
+    routeSuffix = (await api('/api/settings').catch(() => ({})))?.provider?.domainSuffix || '';
+  }
+  const host = f.host.value.trim() || (routeSuffix ? `app-${port}-${routeSuffix}` : '');
+  el.innerHTML = host
+    ? `主机名：<code>${esc(host)}</code>`
+    : '尚未配置固定域名后缀，请先到「设置」页填写。';
 }
 
 $('#btn-add-route').addEventListener('click', () => showRouteForm());
 $('#btn-cancel-route').addEventListener('click', () => $('#route-form-panel').classList.add('hidden'));
 $('#route-form [name=proxy]')?.addEventListener('change', updateProxyWarn);
+$('#route-form [name=port]')?.addEventListener('input', updateRoutePreview);
 
 $('#route-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
+  const port = f.port.value.trim().replace(/^app-?/i, '');
+  // A blank hostname means "generate it from the port and the configured suffix".
+  let host = f.host.value.trim();
+  if (!host) {
+    if (!routeSuffix) routeSuffix = (await api('/api/settings').catch(() => ({})))?.provider?.domainSuffix || '';
+    if (!routeSuffix) {
+      alert('请先在「设置」页填写固定代理域名后缀');
+      return;
+    }
+    if (!port) {
+      alert('请填写应用端口');
+      return;
+    }
+    host = `app-${port}-${routeSuffix}`;
+  }
   const body = {
-    host: f.host.value.trim(),
-    upstreamPort: f.upstreamPort.value.trim() || undefined,
+    host,
+    upstreamPort: f.upstreamPort.value.trim() || port || undefined,
     upstreamHost: f.upstreamHost.value.trim() || undefined,
     providerId: f.providerId.value,
     note: f.note.value.trim(),
@@ -262,10 +302,11 @@ async function loadSettings() {
   const s = await api('/api/settings');
   const f = $('#settings-form');
   f.providerId.value = s.provider?.id || 'ugos';
-  f.authBase.value = s.provider?.authBase || '';
+  f.alias.value = s.provider?.alias || '';
   f.username.value = s.provider?.username || '';
   f.password.value = '';
   f.domainSuffix.value = s.provider?.domainSuffix || '';
+  routeSuffix = s.provider?.domainSuffix || '';
   const hosts = await api('/api/hosts');
   $('#hosts-block').textContent = hosts.block || '(尚未同步)';
   const status = await api('/api/status');
@@ -321,14 +362,14 @@ $('#btn-discover-base')?.addEventListener('click', async () => {
   const btn = $('#btn-discover-base');
   const label = btn.textContent;
   btn.disabled = true;
-  btn.textContent = '探测中…';
+  btn.textContent = '检测中…';
   try {
     const r = await api('/api/provider/discover', { method: 'POST' });
     if (!r.ok) throw new Error(r.error || '未找到可用地址');
-    const f = $('#settings-form');
-    f.authBase.value = r.authBase;
-    if (r.domainSuffix) f.domainSuffix.value = r.domainSuffix;
-    alert(`已找到: ${r.authBase}\n点击「保存设置」应用；路由上游会自动更新，书签不受影响。`);
+    alert(
+      `别名 ${r.alias} 当前地址:\n${r.authBase}\n\n` +
+        `访问用的固定域名后缀请单独填写（例如 yuceyang.cn68.ugdocker.link），与这个地址无关。`,
+    );
   } catch (err) {
     alert(err.message);
   } finally {
@@ -342,15 +383,16 @@ $('#settings-form').addEventListener('submit', async (e) => {
   const f = e.target;
   const provider = {
     id: f.providerId.value,
-    authBase: f.authBase.value.trim(),
+    alias: f.alias.value.trim(),
     username: f.username.value.trim(),
     domainSuffix: f.domainSuffix.value.trim(),
   };
   if (f.password.value) provider.password = f.password.value;
   try {
     const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ provider }) });
+    routeSuffix = provider.domainSuffix || routeSuffix;
     const n = (r.remapped || []).length;
-    alert(n ? `已保存；${n} 条路由的上游地址已同步更新（本地主机名不变）` : '已保存');
+    alert(n ? `已保存；${n} 条路由的主机名已按新后缀更新` : '已保存');
   } catch (err) {
     alert(err.message);
   }

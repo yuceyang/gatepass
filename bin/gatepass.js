@@ -41,11 +41,11 @@ async function init() {
   const ask = (q, def = '') => rl.question(q + (def ? ` [${def}]` : '') + ': ').then((a) => a.trim() || def);
 
   log('\n=== GatePass 首次向导 ===\n');
-  const authBase = await ask('NAS 登录地址（如 https://xxx.cn68.ug.link）');
+  const alias = await ask('UGREENlink 别名（ug.link 后面的名字，如 yuceyang）');
   const username = await ask('用户名');
   const password = await ask('密码');
-  const domainSuffix = await ask('代理域名后缀（如 yuceyang.cn68.ugdocker.link）');
-  const routeHost = await ask('首个路由主机名（如 app-5006-yuceyang.cn68.ugdocker.link，可留空稍后在控制台添加）');
+  const domainSuffix = await ask('代理域名后缀（固定，不随远程地址变化；如 yuceyang.cn68.ugdocker.link）');
+  const routePort = await ask('首个应用端口（如 5006，可留空稍后在控制台添加）');
   const proxyPort = await ask(`代理端口（默认 ${defaultProxyPort()}）`, String(defaultProxyPort()));
   const consolePort = await ask('控制台端口（建议非常用端口，如 19099）', '19099');
 
@@ -54,7 +54,8 @@ async function init() {
   config.provider = {
     ...config.provider,
     id: 'ugos',
-    authBase,
+    alias,
+    authBase: '',
     username,
     password,
     domainSuffix,
@@ -69,12 +70,15 @@ async function init() {
   }
   config.onboardingDone = true;
 
-  if (routeHost) {
+  // 只需端口：主机名由「端口 + 固定后缀」拼出来，书签永远不用改。
+  if (routePort) {
     const { RouteRegistry } = await import('../src/core/routes.js');
     const rr = new RouteRegistry({ routes: config.routes });
     try {
-      const r = rr.add({ host: routeHost });
+      const host = `app-${String(routePort).replace(/^app-?/i, '')}-${domainSuffix}`;
+      const r = rr.add({ host });
       config.routes = [r];
+      log(`  路由: ${r.host}`);
     } catch (e) {
       log(`  路由添加跳过: ${e.message}`);
     }

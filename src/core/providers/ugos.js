@@ -93,6 +93,7 @@ export class UgosProvider {
    * @param {{authBase:string, username:string, password:string, keepalive?:boolean, log?:Function}} opts
    */
   constructor(opts) {
+    this.alias = String(opts.alias || '').trim();
     this.authBase = String(opts.authBase || '').replace(/\/$/, '');
     this.username = opts.username || '';
     this.password = opts.password || '';
@@ -104,6 +105,24 @@ export class UgosProvider {
     /** @type {Map<string,{token:string, expiresAt:number}>} */
     this.gatewayTokens = new Map();
     this.stats = { logins: 0, loginFailures: 0, gatewayTokens: 0 };
+    /** Suffix reported by UGREENlink for the last successful lookup. */
+    this.discoveredSuffix = '';
+    /** The user's fixed suffix (hosts / certificates / bookmarks are built from this). */
+    this.suffix = String(opts.domainSuffix || '').replace(/^\./, '');
+    /** Resolved gateway host + when it was resolved, so we do not re-query on every request. */
+    this._resolvedBase = '';
+    this._resolvedAt = 0;
+  }
+
+  /**
+   * The gateway suffix that is live *right now* — the part that moves when the NAS
+   * re-registers (cn68 → cn11). `null` until a lookup has told us, so callers keep
+   * using the route's own upstream host (which is what the fixed suffix yields).
+   *
+   * @returns {string|null}
+   */
+  liveSuffix() {
+    return this.discoveredSuffix || null;
   }
 
   /**
@@ -117,21 +136,31 @@ export class UgosProvider {
    */
   applyConfig(opts = {}) {
     const next = {
+      alias: String(opts.alias ?? this.alias).trim(),
       authBase: String(opts.authBase ?? this.authBase).replace(/\/$/, ''),
       username: opts.username ?? this.username,
       password: opts.password ?? this.password,
+      suffix: String(opts.domainSuffix ?? this.suffix).replace(/^\./, ''),
     };
     const changed =
+      next.alias !== this.alias ||
       next.authBase !== this.authBase ||
       next.username !== this.username ||
       next.password !== this.password;
+    const suffixChanged = next.suffix !== this.suffix;
     Object.assign(this, next);
     if (changed) {
-      // Credentials changed: drop everything derived from the old ones.
+      // Credentials or target changed: drop everything derived from the old ones.
       this.session = null;
       this._loginPromise = null;
       this.gatewayTokens.clear();
       this.stats.loginFailures = 0;
+      this._resolvedBase = '';
+      this._resolvedAt = 0;
+      this.discoveredSuffix = '';
+    } else if (suffixChanged) {
+      // A new fixed suffix means the routes were rewritten too, so the old answer is stale.
+      this.discoveredSuffix = '';
     }
     return changed;
   }
@@ -185,6 +214,54 @@ export class UgosProvider {
    * the `.ug.link` domain — and probe the small set of plausible suffixes in parallel.
    */
   /**
+   * Returns the gateway host to talk to right now.
+   *
+   * With an alias configured this asks UGREENlink (cached for [RESOLVE_TTL_MS]), which is the
+   * authoritative answer and survives the suffix changing after a device re-register. The
+   * manually entered authBase is only a fallback for when that lookup is unavailable.
+   */
+  async resolveBase({ force = false } = {}) {
+    const now = Date.now();
+    if (!force && this._resolvedBase && now - this._resolvedAt < RESOLVE_TTL_MS) {
+      return this._resolvedBase;
+    }
+
+    if (this.alias) {
+      const hit = await this.lookupByAlias(this.alias).catch(() => null);
+      if (hit?.authBase) {
+        const ok = await this._check(hit.authBase).then(() => true).catch(() => false);
+        if (ok) {
+          if (this._resolvedBase && this._resolvedBase !== hit.authBase) {
+            this.log(`[ugos] 登录地址变化: ${this._resolvedBase} → ${hit.authBase}`);
+          }
+          this.discoveredSuffix = hit.domainSuffix;
+          this._resolvedBase = hit.authBase;
+          this._resolvedAt = now;
+          return hit.authBase;
+        }
+      }
+      this.log(`[ugos] 未能通过别名 ${this.alias} 解析到可用地址`);
+    }
+
+    if (this.authBase) {
+      // Manual address: verify it is alive, otherwise fall back to the scan.
+      const alive = await this._check(this.authBase).then(() => true).catch(() => false);
+      if (alive) {
+        this._resolvedBase = this.authBase;
+        this._resolvedAt = now;
+        return this.authBase;
+      }
+      const discovered = await this.discoverAuthBase().catch(() => null);
+      if (discovered) {
+        this._resolvedBase = discovered;
+        this._resolvedAt = now;
+        return discovered;
+      }
+    }
+    return this.authBase;
+  }
+
+  /**
    * Asks UGREENlink for the device behind an alias. This is the same lookup the web app at
    * ug.link/<alias> performs, and it returns the current suffix directly:
    *
@@ -228,7 +305,9 @@ export class UgosProvider {
   async discoverAuthBase() {
     const known = String(this.authBase || '');
     const aliasMatch = known.match(/^https?:\/\/([^.]+)\.cn\d+\.ug\.link/i);
-    const alias = aliasMatch ? aliasMatch[1] : '';
+    // The configured alias is authoritative; parsing authBase is only a fallback for older
+    // configs that predate the alias field (and where authBase is a bare cnN URL).
+    const alias = this.alias || (aliasMatch ? aliasMatch[1] : '');
 
     if (alias) {
       const byAlias = await this.lookupByAlias(alias).catch(() => null);
@@ -279,22 +358,24 @@ export class UgosProvider {
     if (!this.username || !this.password) throw new Error('未配置账号密码');
     this.stats.logins++;
 
+    // Always start from the address UGREENlink currently reports; the stored one may be stale.
+    let base = await this.resolveBase({ force: true }).catch(() => this.authBase);
     let checkRes;
     try {
-      checkRes = await this._check(this.authBase);
+      checkRes = await this._check(base);
     } catch (e) {
-      // The remote-access hostname carries a per-boot suffix (cn68 → cn11 after a restart), so a
-      // stored authBase goes stale. Discover the live one before giving up.
       const discovered = await this.discoverAuthBase().catch(() => null);
       if (!discovered) throw e;
       this.log(`[ugos] 登录地址已失效，自动切换到 ${discovered}`);
-      this.authBase = discovered;
-      checkRes = await this._check(discovered);
+      base = discovered;
+      this._resolvedBase = discovered;
+      this._resolvedAt = Date.now();
+      checkRes = await this._check(base);
     }
     const publicKeyPem = decodePublicKeyPem(checkRes.headers.get('x-rsa-token'));
     const encPassword = rsaEncryptWithPem(publicKeyPem, this.password);
 
-    const loginRes = await fetch(`${this.authBase}/ugreen/v1/verify/login`, {
+    const loginRes = await fetch(`${base}/ugreen/v1/verify/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'UG-Agent': 'PC/WEB', 'Cache-Control': 'no-cache' },
       body: JSON.stringify({
@@ -341,7 +422,8 @@ export class UgosProvider {
     if (!this.session?.token) throw new Error('NAS 会话不可用');
 
     const port = extractPortFromHost(host);
-    const url = `${this.authBase}/ugreen/v1/gateway/proxy/dockerToken?port=${encodeURIComponent(port)}&token=${encodeURIComponent(this.session.token)}`;
+    const base = await this.resolveBase().catch(() => this.authBase);
+    const url = `${base}/ugreen/v1/gateway/proxy/dockerToken?port=${encodeURIComponent(port)}&token=${encodeURIComponent(this.session.token)}`;
     const res = await fetch(url);
     const body = await res.json().catch(() => null);
     if (body?.code !== 200 || !body?.data?.redirect_url) {
@@ -458,10 +540,15 @@ export function createProvider(cfg) {
     case 'ugos':
     default:
       return new UgosProvider({
+        alias: p.alias,
         authBase: p.authBase,
         username: p.username,
         password: p.password,
+        domainSuffix: p.domainSuffix,
         keepalive: p.keepalive,
       });
   }
 }
+
+/** How long a UGREENlink-resolved gateway address is trusted before re-checking. */
+const RESOLVE_TTL_MS = 10 * 60 * 1000;

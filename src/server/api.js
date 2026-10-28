@@ -321,7 +321,12 @@ export function createConsoleServer(deps) {
         // Prefer the suffix UGREENlink reported, else derive from the host.
         const m = found.replace(/^https?:\/\//, '').match(/^(.+?)\.ug\.link\/?$/i);
         const suffix = provider.discoveredSuffix || (m ? `${m[1]}.ugdocker.link` : '');
-        return json(res, 200, { ok: true, authBase: found, domainSuffix: suffix });
+        return json(res, 200, {
+          ok: true,
+          alias: provider.alias || '',
+          authBase: found,
+          domainSuffix: suffix,
+        });
       }
 
       if (p === '/api/hosts' && req.method === 'GET') {

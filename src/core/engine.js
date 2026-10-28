@@ -77,6 +77,23 @@ export class Engine {
     return ip;
   }
 
+  /**
+   * The hostname to actually dial for [route].
+   *
+   * `route.host` is the fixed local name (bookmarks), while the gateway's real suffix moves
+   * (cn68 → cn11). When the provider has resolved a live suffix, rewrite the route's upstream
+   * to that suffix so the fixed name keeps working without any manual bookkeeping.
+   */
+  upstreamHostFor(route) {
+    const base = route.upstreamHost || route.host;
+    const live = this.provider?.liveSuffix?.();
+    const fixed = this.provider?.suffix;
+    if (!live || !fixed || live === fixed) return base;
+    const at = base.indexOf(fixed);
+    if (at < 0 || at + fixed.length !== base.length) return base;
+    return base.slice(0, at) + live;
+  }
+
   /** 启动 HTTPS 监听，返回 server */
   async listen(port, host = '127.0.0.1') {
     this.httpsServer = https.createServer({ key: this.certs.key, cert: this.certs.cert }, (req, res) =>
@@ -185,17 +202,20 @@ export class Engine {
 
   async forward(req, res, route, allowRetry, t0) {
     const hostname = route.host;
-    const realIp = await this.resolveUpstream(route.upstreamHost || hostname);
     // upstreamPort 是网关后的应用端口（用于 dockerToken 等），TCP 上游默认连网关 443
     const upstreamConnectPort = Number(route.upstreamConnectPort || 443);
 
-    // Provider 注入鉴权（可能带 query token）
+    // Provider 注入鉴权（可能带 query token）。This also resolves the live gateway suffix,
+    // so the upstream host must be computed *after* it — otherwise the first request after
+    // startup would still dial the stale fixed suffix.
     const injected = await this.provider.applyToRequest(
       { headers: { ...req.headers }, path: req.url },
       route
     );
+    const upstreamHost = this.upstreamHostFor(route);
+    const realIp = await this.resolveUpstream(upstreamHost);
     const headers = { ...injected.headers };
-    headers.host = route.upstreamHost || hostname;
+    headers.host = upstreamHost;
     if (headers.cookie?.includes('ugreen-proxy-token') || headers.authorization) this.stats.authInjected++;
     for (const h of HOP_BY_HOP) delete headers[h];
 
@@ -206,7 +226,7 @@ export class Engine {
       path: injected.path || req.url,
       headers,
       agent: this.upstreamAgent,
-      servername: route.upstreamHost || hostname,
+      servername: upstreamHost,
       rejectUnauthorized: !this.insecureUpstreamTls,
     };
 
@@ -273,15 +293,16 @@ export class Engine {
       await this.provider.ensureSession();
       const injected = await this.provider.applyToRequest({ headers: { ...req.headers }, path: req.url }, route);
       const headers = { ...injected.headers };
-      headers.host = route.upstreamHost || hostname;
+      const upstreamHost = this.upstreamHostFor(route);
+      headers.host = upstreamHost;
       for (const h of HOP_BY_HOP) delete headers[h];
 
-      const realIp = await this.resolveUpstream(route.upstreamHost || hostname);
+      const realIp = await this.resolveUpstream(upstreamHost);
       const upstream = tls.connect(
         {
           host: realIp,
           port: Number(route.upstreamConnectPort || 443),
-          servername: route.upstreamHost || hostname,
+          servername: upstreamHost,
           rejectUnauthorized: !this.insecureUpstreamTls,
           agent: this.upstreamAgent,
         },
@@ -324,15 +345,16 @@ export class Engine {
         route
       );
       const headers = { ...injected.headers };
-      headers.host = route.upstreamHost || hostname;
+      const upstreamHost = this.upstreamHostFor(route);
+      headers.host = upstreamHost;
       for (const h of HOP_BY_HOP) delete headers[h];
 
-      const realIp = await this.resolveUpstream(route.upstreamHost || hostname);
+      const realIp = await this.resolveUpstream(upstreamHost);
       const upstream = tls.connect(
         {
           host: realIp,
           port: Number(route.upstreamConnectPort || 443),
-          servername: route.upstreamHost || hostname,
+          servername: upstreamHost,
           rejectUnauthorized: !this.insecureUpstreamTls,
         },
         () => {
