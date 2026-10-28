@@ -129,8 +129,14 @@
           <label>用户名 <input name="username" autocomplete="username" /></label>
           <label>密码 <input name="password" type="password" autocomplete="current-password" placeholder="留空则不修改" /></label>
           <label>域名后缀 <input name="domainSuffix" placeholder="yuceyang.cn68.ugdocker.link" /></label>
+          <p class="hint">
+            绿色云会为 NAS 分配形如 <code>yuceyang.cn68</code> 的后缀，设备重新注册后可能变化。
+            改动后缀时，路由的<b>上游地址</b>会自动跟着更新，而浏览器书签使用的本地主机名
+            <b>保持不变</b>，所以已保存的链接无需修改。
+          </p>
           <div class="actions">
             <button type="submit" class="primary">保存设置</button>
+            <button type="button" id="btn-discover-base">探测当前可用地址</button>
           </div>
         </form>
       </div>

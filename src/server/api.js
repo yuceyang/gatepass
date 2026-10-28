@@ -249,6 +249,7 @@ export function createConsoleServer(deps) {
       }
       if (p === '/api/settings' && req.method === 'PUT') {
         const body = await readJson(req);
+        const previousSuffix = config.provider?.domainSuffix || '';
         if (body.provider) {
           // 密码留空表示不改
           if (body.provider.password === '••••••' || body.provider.password === undefined) {
@@ -258,11 +259,20 @@ export function createConsoleServer(deps) {
         }
         if (body.proxy) Object.assign(config.proxy, body.proxy);
         if (body.onboardingDone !== undefined) config.onboardingDone = !!body.onboardingDone;
+
+        // A changed gateway host moves the upstream for every route, but the local hostname
+        // (what bookmarks use) must stay put — so only re-point upstreamHost.
+        const nextSuffix = config.provider?.domainSuffix || '';
+        let remapped = [];
+        if (previousSuffix && nextSuffix && previousSuffix !== nextSuffix) {
+          remapped = routes.remapUpstreamSuffix(previousSuffix, nextSuffix);
+          config.routes = routes.list();
+        }
         saveConfig(config);
         // Push the edit into the running provider, otherwise it keeps the credentials it was
         // constructed with and every request fails until the process restarts.
         provider.applyConfig?.(config.provider);
-        return json(res, 200, { ok: true });
+        return json(res, 200, { ok: true, remapped });
       }
 
       // 可移植配置：与 Android / iOS 客户端共用的 JSON
@@ -300,6 +310,17 @@ export function createConsoleServer(deps) {
           routes: config.routes.length,
           skipped: result.skipped,
         });
+      }
+
+      // 探测 NAS 当前远程访问地址（后缀会随设备重新注册而变化）
+      if (p === '/api/provider/discover' && req.method === 'POST') {
+        const found = await provider.discoverAuthBase?.().catch(() => null);
+        if (!found) {
+          return json(res, 200, { ok: false, error: '未找到可用地址，请确认 NAS 在线' });
+        }
+        // yuceyang.cn11.ug.link → yuceyang.cn11.ugdocker.link
+        const m = found.replace(/^https?:\/\//, '').match(/^(.+?)\.ug\.link\/?$/i);
+        return json(res, 200, { ok: true, authBase: found, domainSuffix: m ? `${m[1]}.ugdocker.link` : '' });
       }
 
       if (p === '/api/hosts' && req.method === 'GET') {

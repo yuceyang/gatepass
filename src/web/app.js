@@ -317,6 +317,26 @@ $('#file-import-config').addEventListener('change', async (e) => {
   }
 });
 
+$('#btn-discover-base')?.addEventListener('click', async () => {
+  const btn = $('#btn-discover-base');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '探测中…';
+  try {
+    const r = await api('/api/provider/discover', { method: 'POST' });
+    if (!r.ok) throw new Error(r.error || '未找到可用地址');
+    const f = $('#settings-form');
+    f.authBase.value = r.authBase;
+    if (r.domainSuffix) f.domainSuffix.value = r.domainSuffix;
+    alert(`已找到: ${r.authBase}\n点击「保存设置」应用；路由上游会自动更新，书签不受影响。`);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+});
+
 $('#settings-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
@@ -328,8 +348,9 @@ $('#settings-form').addEventListener('submit', async (e) => {
   };
   if (f.password.value) provider.password = f.password.value;
   try {
-    await api('/api/settings', { method: 'PUT', body: JSON.stringify({ provider }) });
-    alert('已保存');
+    const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ provider }) });
+    const n = (r.remapped || []).length;
+    alert(n ? `已保存；${n} 条路由的上游地址已同步更新（本地主机名不变）` : '已保存');
   } catch (err) {
     alert(err.message);
   }
