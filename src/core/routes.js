@@ -34,6 +34,9 @@ export class RouteRegistry {
         .replace(/^https?:\/\//, '')
         .replace(/\/.*$/, '')
         .replace(/:\d+$/, '');
+    // `system` marks a NAS system service (the UGOS desktop on :9443). Those are served by the
+    // relay host, not by the docker port mapping — see Engine.upstreamHostFor.
+    const kind = input.kind === 'system' ? 'system' : 'app';
     const host = cleanHost(input.host);
     if (!host || !HOST_RE.test(host)) {
       throw new Error(`非法主机名: ${input.host}`);
@@ -51,6 +54,7 @@ export class RouteRegistry {
     return {
       id: input.id || crypto.randomUUID(),
       host,
+      kind,
       // upstreamPort：网关后的应用端口（dockerToken 用）；TCP 上游端口见 upstreamConnectPort（默认 443）
       upstreamHost,
       upstreamPort,

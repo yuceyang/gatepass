@@ -228,6 +228,23 @@ https://app-9000-<你的域名>/admin/
 > 但握手后的原始字节会被网关断开。因此经绿联隧道时正向代理只能走 HTTP 站点；需要 HTTPS 代理时，
 > 请改用支持 TCP 转发的隧道（frp / ngrok tcp）或局域网直连 `http://<NAS>:<端口>`。
 
+## NAS 系统服务（如 9443 后台）
+
+绿联的 Docker 端口映射只转发明文 HTTP。而 **9443 是 NAS 系统自身的 HTTPS 端口**（UGOS Pro
+桌面端），它只接受 TLS，于是经映射访问会得到 nginx 的
+`400 The plain HTTP request was sent to HTTPS port`。
+
+这类系统服务应当走中继域名而不是端口映射。添加路由时勾选「NAS 系统服务」即可：GatePass
+会把上游指向 `<别名>.<relayDomain>`（如 `yuceyang.cn11.ug.link`），并用 NAS 会话 Cookie
+鉴权，不再申请 docker token。
+
+```bash
+# 控制台：路由 → 添加，端口填 9443，勾选「NAS 系统服务」
+# 之后 https://app-9443-<固定后缀>/ 就是 NAS 后台
+```
+
+> 若不是系统服务而是普通应用，请**不要**勾选此项——它会让请求绕过端口映射。
+
 ## 控制台
 
 | 页面 | 功能 |

@@ -85,6 +85,13 @@ export class Engine {
    * to that suffix so the fixed name keeps working without any manual bookkeeping.
    */
   upstreamHostFor(route) {
+    // System services (the UGOS desktop on :9443) are not behind the docker port mapping:
+    // that mapping forwards plain HTTP, and IIS there speaks TLS only, so it answers
+    // "400 The plain HTTP request was sent to HTTPS port". The relay host serves them instead.
+    if (route.kind === 'system') {
+      const relay = this.provider?.relayHost;
+      if (relay) return relay;
+    }
     const base = route.upstreamHost || route.host;
     const live = this.provider?.liveSuffix?.();
     const fixed = this.provider?.suffix;

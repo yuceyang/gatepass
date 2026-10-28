@@ -44,3 +44,18 @@ test('upstreamHostFor does not rewrite when the suffix is unchanged', () => {
   const route = engine.routes.list()[0];
   assert.equal(engine.upstreamHostFor(route), `app-5006-${FIXED}`);
 });
+
+test('upstreamHostFor sends a system route to the relay host', () => {
+  // :9443 is the UGOS desktop: the docker mapping forwards plain HTTP and IIS there speaks
+  // TLS only ("400 The plain HTTP request was sent to HTTPS port"), so the relay serves it.
+  const engine = makeEngine({ liveSuffix: 'alice.cn11.ugdocker.link' });
+  engine.provider.relayHost = 'alice.cn11.ug.link';
+  const route = engine.routes.add({ host: `app-9443-${FIXED}`, kind: 'system' });
+  assert.equal(engine.upstreamHostFor(route), 'alice.cn11.ug.link');
+});
+
+test('upstreamHostFor falls back for a system route before the relay is known', () => {
+  const engine = makeEngine({ liveSuffix: null });
+  const route = engine.routes.add({ host: `app-9443-${FIXED}`, kind: 'system' });
+  assert.equal(engine.upstreamHostFor(route), `app-9443-${FIXED}`);
+});

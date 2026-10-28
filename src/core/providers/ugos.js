@@ -107,6 +107,8 @@ export class UgosProvider {
     this.stats = { logins: 0, loginFailures: 0, gatewayTokens: 0 };
     /** Suffix reported by UGREENlink for the last successful lookup. */
     this.discoveredSuffix = '';
+    /** Relay host (`<alias>.<relayDomain>`) — the NAS system UI lives here, not on a mapped port. */
+    this.relayHost = '';
     /** The user's fixed suffix (hosts / certificates / bookmarks are built from this). */
     this.suffix = String(opts.domainSuffix || '').replace(/^\./, '');
     /** Resolved gateway host + when it was resolved, so we do not re-query on every request. */
@@ -235,6 +237,7 @@ export class UgosProvider {
             this.log(`[ugos] 登录地址变化: ${this._resolvedBase} → ${hit.authBase}`);
           }
           this.discoveredSuffix = hit.domainSuffix;
+          this.relayHost = hit.relayHost || '';
           this._resolvedBase = hit.authBase;
           this._resolvedAt = now;
           return hit.authBase;
@@ -269,7 +272,7 @@ export class UgosProvider {
    *   → { data: { appDomain: "cn11.ugapp.link", dockerDomain: "cn11.ugdocker.link",
    *               relayDomain: "cn11.ug.link", ... } }
    *
-   * @returns {Promise<{authBase:string, domainSuffix:string, dockerDomain:string}|null>}
+   * @returns {Promise<{authBase:string, domainSuffix:string, dockerDomain:string, relayHost:string}|null>}
    */
   async lookupByAlias(alias) {
     if (!alias) return null;
@@ -292,6 +295,7 @@ export class UgosProvider {
       authBase: `https://${relayHost}`,
       domainSuffix: docker ? `${alias}.${docker}` : '',
       dockerDomain: docker,
+      relayHost,
     };
   }
 
@@ -449,6 +453,14 @@ export class UgosProvider {
     const headers = { ...req.headers };
     const parts = [];
     if (this.session?.cookies) parts.push(this.session.cookies);
+    // A system route is served by the relay host, which authenticates from the NAS session
+    // cookie — a dockerToken for :9443 would only yield the "not a mapped port" error page.
+    if (route?.kind === 'system') {
+      if (parts.length) {
+        headers.cookie = headers.cookie ? `${headers.cookie}; ${parts.join('; ')}` : parts.join('; ');
+      }
+      return { ...req, headers };
+    }
     try {
       const gw = await this.renewGatewayToken(host);
       if (gw) parts.push(`ugreen-proxy-token=${gw}`);

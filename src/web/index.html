@@ -79,6 +79,7 @@
           <label>备注 <input name="note" /></label>
           <label class="row"><input type="checkbox" name="enabled" checked /> 启用</label>
           <label class="row"><input type="checkbox" name="http" /> 纯 HTTP 访问（供不接受自签证书的客户端）</label>
+          <label class="row"><input type="checkbox" name="system" /> NAS 系统服务（如 9443 后台；经中继访问，不走向端口映射）</label>
           <label class="row"><input type="checkbox" name="proxy" /> 正向代理（如 Mihomo / Clash 代理）</label>
           <label>代理端口 <input name="proxyPort" placeholder="留空自动 = 18000 + 应用端口（7890 → 25890）" /></label>
           <details class="hint">

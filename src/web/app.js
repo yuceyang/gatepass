@@ -157,6 +157,7 @@ function showRouteForm(r = null) {
   f.note.value = r?.note || '';
   f.enabled.checked = r?.enabled !== false;
   f.http.checked = r?.http === true;
+  f.system.checked = r?.kind === 'system';
   f.proxy.checked = r?.proxy === true;
   f.proxyPort.value = r?.proxyPort || '';
   updateProxyWarn();
@@ -214,6 +215,7 @@ $('#route-form').addEventListener('submit', async (e) => {
     note: f.note.value.trim(),
     enabled: f.enabled.checked,
     http: f.http.checked,
+    kind: f.system.checked ? 'system' : 'app',
     proxy: f.proxy.checked,
     proxyPort: f.proxyPort.value.trim() || undefined,
   };
