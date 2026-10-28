@@ -284,7 +284,13 @@ async function cmdImport() {
   const { RouteRegistry } = await import('../src/core/routes.js');
   const registry = new RouteRegistry();
   const { skipped } = registry.replaceAll(
-    routes.map((r) => ({ host: r.host, enabled: r.enabled, http: r.httpIngress === true, providerId: provider.id })),
+    routes.map((r) => ({
+      host: r.host,
+      enabled: r.enabled,
+      http: r.httpIngress === true,
+      kind: r.kind === 'system' ? 'system' : 'app',
+      providerId: provider.id,
+    })),
   );
   for (const s of skipped) log(`  跳过 ${s.host}: ${s.reason}`);
   cfg.routes = registry.list();

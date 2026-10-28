@@ -52,6 +52,33 @@ test('portable: 拒绝非法主机名与地址', () => {
     /非法主机名/,
   );
   assert.throws(() => fromPortable({ version: 1, provider: { authBase: 'ftp://x' }, routes: [] }), /http/);
+  assert.throws(() => fromPortable({ version: 1, provider: {}, routes: [] }), /别名/);
+});
+
+test('portable: 别名为唯一身份，authBase 可留空', () => {
+  // This is the shape the desktop now exports: the login host is resolved from UGREENlink at
+  // runtime, so shipping an authBase would pin a suffix that moves on every re-register.
+  const out = fromPortable({
+    version: 1,
+    provider: { alias: 'yuceyang', authBase: '', username: 'alice', domainSuffix: 'yuceyang.cn68.ugdocker.link' },
+    routes: [],
+  });
+  assert.equal(out.provider.alias, 'yuceyang');
+  assert.equal(out.provider.authBase, '');
+});
+
+test('portable: 别名与中继地址往返保持一致', () => {
+  const withAlias = {
+    ...desktopConfig,
+    provider: { ...desktopConfig.provider, alias: 'alice', authBase: '' },
+    routes: [{ host: 'app-9443-example.ugdocker.link', enabled: true, httpIngress: false, kind: 'system' }],
+  };
+  const p = toPortable(withAlias);
+  assert.equal(p.provider.alias, 'alice');
+  assert.equal(p.routes[0].kind, 'system');
+  const back = fromPortable(p);
+  assert.equal(back.provider.alias, 'alice');
+  assert.equal(back.routes[0].kind, 'system');
 });
 
 test('portable: 去重并规范化主机名', () => {
