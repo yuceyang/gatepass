@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { isTermux, termuxAutostartNotice } from './termux.js';
 
@@ -58,8 +58,35 @@ function gatepassExe() {
   return { file: process.execPath, args: [localBin, 'start'], shell: false };
 }
 
+/**
+ * Windows 上直接跑 node + bin，绕开 `gatepass.cmd`。
+ *
+ * The npm shim is a batch file, so it always gets a console window; closing that window (or
+ * the UAC helper that spawned it) delivers Ctrl+C to the proxy — which is exactly the `^C`
+ * in gatepass-start.log and why the service kept "dropping". Going straight to node.exe with
+ * a hidden launcher removes the console entirely.
+ */
+function windowsNodeCommand() {
+  const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const bin = path.join(pkgRoot, 'bin', 'gatepass.js');
+  return { exe: process.execPath, bin };
+}
+
+/** Windows 上自启改用计划任务后，用任务是否存在判断。 */
+async function winTaskExists(taskName = 'GatePass') {
+  if (process.platform !== 'win32') return false;
+  return execFileAsync('schtasks', ['/query', '/tn', taskName]).then(() => true, () => false);
+}
+
 export function isAutostartInstalled(options = {}) {
   if (isTermux(options.platform || process.platform, options.env || process.env)) return false;
+  if ((options.platform || process.platform) === 'win32') {
+    // 同步接口：查不到任务时再看启动文件夹（回退安装的情况）。
+    try {
+      execFileSync('schtasks', ['/query', '/tn', 'GatePass'], { stdio: 'ignore' });
+      return true;
+    } catch { /* 没有任务，继续看文件 */ }
+  }
   const p = autostartPaths(options);
   return fs.existsSync(path.join(p.dir, p.file));
 }
@@ -72,6 +99,34 @@ export async function installAutostart(options = {}) {
   fs.mkdirSync(p.dir, { recursive: true });
   const target = path.join(p.dir, p.file);
   const exe = gatepassExe();
+
+  if (process.platform === 'win32') {
+    // A hidden VBS→cmd launcher still leaves the child attached to a console, and the proxy
+    // died with `^C` whenever that console went away. A logon-triggered scheduled task runs
+    // node directly, windowless, and needs no helper window to stay alive.
+    const { exe, bin } = windowsNodeCommand();
+    const logDir = path.join(process.env.APPDATA || p.dir, 'gatepass');
+    fs.mkdirSync(logDir, { recursive: true });
+    const logPath = path.join(logDir, 'gatepass.out.log');
+    const taskName = 'GatePass';
+    const tr = `"${exe}" "${bin}" start`;
+    // /rl highest：代理要绑 443，用管理员权限才能开机不弹 UAC 直接运行。
+    const created = await execFileAsync('schtasks', [
+      '/create', '/tn', taskName, '/tr', tr, '/sc', 'onlogon', '/rl', 'highest', '/f',
+    ]).then(() => true, () => false);
+
+    if (created) {
+      // 清理旧的自启动文件，避免两套机制各拉起一个实例。
+      for (const legacy of ['gatepass-start.vbs', 'gatepass-start.cmd', 'gatepass-start.bat']) {
+        const f = path.join(p.dir, legacy);
+        if (fs.existsSync(f)) {
+          try { fs.unlinkSync(f); } catch { /* ignore */ }
+        }
+      }
+      return { ok: true, path: taskName, kind: 'schtask', logPath };
+    }
+    // 建任务失败（多为未提权）时回退到启动文件夹，至少不会完全没有自启。
+  }
 
   if (process.platform === 'win32') {
     // 隐藏启动的代价是没有输出，失败时无从排查。拆成两个文件：
@@ -131,6 +186,19 @@ X-GNOME-Autostart-enabled=true
 export async function removeAutostart(options = {}) {
   if (isTermux(options.platform || process.platform, options.env || process.env)) {
     return { ok: false, supported: false, removed: false, note: termuxAutostartNotice() };
+  }
+  if ((options.platform || process.platform) === 'win32') {
+    const hadTask = await execFileAsync('schtasks', ['/delete', '/tn', 'GatePass', '/f'])
+      .then(() => true, () => false);
+    // 回退安装的启动文件夹文件也要清掉。
+    const wp = autostartPaths(options);
+    for (const f of ['gatepass-start.vbs', 'gatepass-start.cmd', 'gatepass-start.bat']) {
+      const file = path.join(wp.dir, f);
+      if (fs.existsSync(file)) {
+        try { fs.unlinkSync(file); } catch { /* ignore */ }
+      }
+    }
+    if (hadTask) return { ok: true, removed: true, path: 'GatePass' };
   }
   const p = autostartPaths(options);
   const target = path.join(p.dir, p.file);
