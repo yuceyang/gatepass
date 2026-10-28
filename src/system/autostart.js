@@ -72,6 +72,34 @@ function windowsNodeCommand() {
   return { exe: process.execPath, bin };
 }
 
+/**
+ * Writes a launcher that starts the proxy with **no console window at all**.
+ *
+ * `node.exe` is a console program, so a scheduled task running it in an interactive session
+ * always gives it a window — and closing that window sends Ctrl+C, killing the proxy. The
+ * task's own `<Hidden>` setting only hides the task, not the child's console. Launching
+ * through `wscript` (a GUI process, so it never allocates a console) with `Run(..., 0, False)`
+ * starts node in a hidden window instead, which nothing can close by hand.
+ *
+ * @returns {string} path to the generated .vbs
+ */
+function writeHiddenLauncher(dir) {
+  const { exe, bin } = windowsNodeCommand();
+  fs.mkdirSync(dir, { recursive: true });
+  const vbsPath = path.join(dir, 'gatepass-hidden.vbs');
+  const logPath = path.join(dir, 'gatepass.out.log');
+  // WScript.Run cannot redirect, so route through cmd /c (kept hidden by window style 0).
+  // Every inner quote is doubled because the whole command is a VBS string literal.
+  const inner = `cmd.exe /c ""${exe}" "${bin}" start 1>>"${logPath}" 2>&1"`;
+  const body = [
+    'Set sh = CreateObject("WScript.Shell")',
+    `sh.Run "${inner.replace(/"/g, '""')}", 0, False`,
+    '',
+  ].join('\r\n');
+  fs.writeFileSync(vbsPath, body, 'utf8');
+  return { vbsPath, logPath };
+}
+
 /** Windows 上自启改用计划任务后，用任务是否存在判断。 */
 async function winTaskExists(taskName = 'GatePass') {
   if (process.platform !== 'win32') return false;
@@ -101,15 +129,12 @@ export async function installAutostart(options = {}) {
   const exe = gatepassExe();
 
   if (process.platform === 'win32') {
-    // A hidden VBS→cmd launcher still leaves the child attached to a console, and the proxy
-    // died with `^C` whenever that console went away. A logon-triggered scheduled task runs
-    // node directly, windowless, and needs no helper window to stay alive.
-    const { exe, bin } = windowsNodeCommand();
+    // node.exe is a console program: run by the task directly it gets a window, and closing
+    // that window sends Ctrl+C (the `^C` in the logs). Go through wscript so it starts hidden.
     const logDir = path.join(process.env.APPDATA || p.dir, 'gatepass');
-    fs.mkdirSync(logDir, { recursive: true });
-    const logPath = path.join(logDir, 'gatepass.out.log');
+    const { vbsPath, logPath } = writeHiddenLauncher(logDir);
     const taskName = 'GatePass';
-    const tr = `"${exe}" "${bin}" start`;
+    const tr = `wscript.exe "${vbsPath}"`;
     // /rl highest：代理要绑 443，用管理员权限才能开机不弹 UAC 直接运行。
     const created = await execFileAsync('schtasks', [
       '/create', '/tn', taskName, '/tr', tr, '/sc', 'onlogon', '/rl', 'highest', '/f',
@@ -123,23 +148,22 @@ export async function installAutostart(options = {}) {
           try { fs.unlinkSync(f); } catch { /* ignore */ }
         }
       }
-      return { ok: true, path: taskName, kind: 'schtask', logPath };
+      return { ok: true, path: taskName, kind: 'schtask', logPath, launcher: vbsPath };
     }
     // 建任务失败（多为未提权）时回退到启动文件夹，至少不会完全没有自启。
   }
 
   if (process.platform === 'win32') {
-    // 隐藏启动的代价是没有输出，失败时无从排查。拆成两个文件：
-    //   gatepass-start.cmd —— 真正运行，把输出重定向到日志
-    //   gatepass-start.vbs —— 以 window style 0 静默调用上面的 cmd，不留窗口
+    // 回退路径（没权限建计划任务时）。同样不能走 `gatepass.cmd`：那个 shim 没提权时会用
+    // UAC 再开一个可见窗口，窗口一关就把服务 Ctrl+C 掉。这里直接调 node。
     const logPath = path.join(p.dir, 'gatepass-start.log');
     const cmdPath = path.join(p.dir, 'gatepass-start.cmd');
-    const runLine = `"${exe.file}" ${exe.args.join(' ')}`;
+    const { exe: nodeExe, bin: nodeBin } = windowsNodeCommand();
     const cmdBody = [
       '@echo off',
       'chcp 65001 >nul 2>&1',
       `echo [%date% %time%] starting gatepass >> "${logPath}"`,
-      `${runLine} >> "${logPath}" 2>&1`,
+      `"${nodeExe}" "${nodeBin}" start >> "${logPath}" 2>&1`,
       `echo [%date% %time%] exited with %ERRORLEVEL% >> "${logPath}"`,
       '',
     ].join('\r\n');
