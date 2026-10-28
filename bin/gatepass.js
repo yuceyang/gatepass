@@ -312,9 +312,10 @@ async function cmdDiscover() {
   }
   log(`发现可用地址: ${found}`);
 
-  // Derive the app suffix from the gateway host: yuceyang.cn11.ug.link → yuceyang.cn11.ugdocker.link
+  // Prefer the suffix UGREENlink reported (exact), else derive it from the host:
+  // yuceyang.cn11.ug.link → yuceyang.cn11.ugdocker.link
   const hostMatch = found.replace(/^https?:\/\//, '').match(/^(.+?)\.ug\.link\/?$/i);
-  const newSuffix = hostMatch ? `${hostMatch[1]}.ugdocker.link` : '';
+  const newSuffix = probe.discoveredSuffix || (hostMatch ? `${hostMatch[1]}.ugdocker.link` : '');
   const oldSuffix = cfg.provider.domainSuffix || '';
 
   cfg.provider.authBase = found;

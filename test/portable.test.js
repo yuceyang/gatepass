@@ -106,3 +106,34 @@ test('routes: remapUpstreamSuffix 同后缀时不做改动', async () => {
   rr.add({ host: 'app-5006-yuceyang.cn68.ugdocker.link' });
   assert.deepEqual(rr.remapUpstreamSuffix('same.link', 'same.link'), []);
 });
+
+test('ugos: lookupByAlias 解析 UGREENlink 返回的后缀', async () => {
+  const { UgosProvider } = await import('../src/core/providers/ugos.js');
+  const p = new UgosProvider({ authBase: 'https://yuceyang.cn68.ug.link', username: 'u', password: 'p' });
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    json: async () => ({
+      code: 200,
+      data: { relayDomain: 'cn11.ug.link', dockerDomain: 'cn11.ugdocker.link', appDomain: 'cn11.ugapp.link' },
+    }),
+  });
+  try {
+    const r = await p.lookupByAlias('yuceyang');
+    assert.equal(r.authBase, 'https://yuceyang.cn11.ug.link', 'relayDomain 缺少别名时要补上');
+    assert.equal(r.domainSuffix, 'yuceyang.cn11.ugdocker.link');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('ugos: lookupByAlias 在服务异常时返回 null', async () => {
+  const { UgosProvider } = await import('../src/core/providers/ugos.js');
+  const p = new UgosProvider({ authBase: 'https://yuceyang.cn68.ug.link', username: 'u', password: 'p' });
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({ json: async () => ({ code: 500, msg: 'Internal Server Error' }) });
+  try {
+    assert.equal(await p.lookupByAlias('yuceyang'), null);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

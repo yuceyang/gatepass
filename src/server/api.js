@@ -318,9 +318,10 @@ export function createConsoleServer(deps) {
         if (!found) {
           return json(res, 200, { ok: false, error: '未找到可用地址，请确认 NAS 在线' });
         }
-        // yuceyang.cn11.ug.link → yuceyang.cn11.ugdocker.link
+        // Prefer the suffix UGREENlink reported, else derive from the host.
         const m = found.replace(/^https?:\/\//, '').match(/^(.+?)\.ug\.link\/?$/i);
-        return json(res, 200, { ok: true, authBase: found, domainSuffix: m ? `${m[1]}.ugdocker.link` : '' });
+        const suffix = provider.discoveredSuffix || (m ? `${m[1]}.ugdocker.link` : '');
+        return json(res, 200, { ok: true, authBase: found, domainSuffix: suffix });
       }
 
       if (p === '/api/hosts' && req.method === 'GET') {

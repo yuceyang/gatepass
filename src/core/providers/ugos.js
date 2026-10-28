@@ -184,7 +184,67 @@ export class UgosProvider {
    * (a reboot can move it from cn68 to cn11). We keep the stable parts — the account label and
    * the `.ug.link` domain — and probe the small set of plausible suffixes in parallel.
    */
+  /**
+   * Asks UGREENlink for the device behind an alias. This is the same lookup the web app at
+   * ug.link/<alias> performs, and it returns the current suffix directly:
+   *
+   *   POST https://api.ugnas.com/api/p2p/v2/ta/nodeInfo/byAlias {"alias":"yuceyang"}
+   *   → { data: { appDomain: "cn11.ugapp.link", dockerDomain: "cn11.ugdocker.link",
+   *               relayDomain: "cn11.ug.link", ... } }
+   *
+   * @returns {Promise<{authBase:string, domainSuffix:string, dockerDomain:string}|null>}
+   */
+  async lookupByAlias(alias) {
+    if (!alias) return null;
+    const res = await fetch('https://api.ugnas.com/api/p2p/v2/ta/nodeInfo/byAlias', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ alias }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = await res.json().catch(() => null);
+    if (!body || body.code !== 200 || !body.data) return null;
+    const d = body.data;
+    const relay = String(d.relayDomain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const docker = String(d.dockerDomain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!relay) return null;
+    // relayDomain comes back without the alias (`cn11.ug.link`); the gateway host is
+    // `<alias>.<relayDomain>`.
+    const relayHost = relay.includes(alias) ? relay : `${alias}.${relay}`;
+    return {
+      authBase: `https://${relayHost}`,
+      domainSuffix: docker ? `${alias}.${docker}` : '',
+      dockerDomain: docker,
+    };
+  }
+
+  /**
+   * Finds the currently valid remote-access base for this NAS.
+   *
+   * Preferred path: ask UGREENlink by alias (one request, exact answer). Falls back to probing
+   * the neighbouring cnN hosts when that service is unreachable, so a network that blocks
+   * api.ugnas.com still works.
+   */
   async discoverAuthBase() {
+    const known = String(this.authBase || '');
+    const aliasMatch = known.match(/^https?:\/\/([^.]+)\.cn\d+\.ug\.link/i);
+    const alias = aliasMatch ? aliasMatch[1] : '';
+
+    if (alias) {
+      const byAlias = await this.lookupByAlias(alias).catch(() => null);
+      if (byAlias) {
+        // Confirm the gateway really answers there before adopting it.
+        try {
+          await this._check(byAlias.authBase);
+          this.log(`[ugos] UGREENlink 查询到 ${alias} 当前地址: ${byAlias.authBase}`);
+          this.discoveredSuffix = byAlias.domainSuffix;
+          return byAlias.authBase;
+        } catch {
+          this.log(`[ugos] ${byAlias.authBase} 暂时不可用，回退到扫描`);
+        }
+      }
+    }
+
     let parsed;
     try {
       parsed = new URL(this.authBase);
@@ -197,7 +257,6 @@ export class UgosProvider {
     const [, label] = m;
     const proto = parsed.protocol || 'https:';
 
-    // Probe a range around the known suffix first, then a wider sweep.
     const candidates = [];
     for (let i = 1; i <= 40; i++) candidates.push(`${proto}//${label}.cn${i}.ug.link`);
     const hits = await Promise.all(
@@ -212,8 +271,7 @@ export class UgosProvider {
     );
     const found = hits.filter(Boolean);
     if (!found.length) return null;
-    // Prefer the one that differs from the stale value the least... but any live host is fine;
-    // pick deterministically so repeated calls agree.
+    this.discoveredSuffix = `yuceyang.${host.replace(/^[^.]+\./, '')}`;
     return found[0];
   }
 
