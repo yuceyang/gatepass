@@ -59,3 +59,35 @@ test('upstreamHostFor falls back for a system route before the relay is known', 
   const route = engine.routes.add({ host: `app-9443-${FIXED}`, kind: 'system' });
   assert.equal(engine.upstreamHostFor(route), `app-9443-${FIXED}`);
 });
+
+test('rewriteDestination points a MOVE at the host we actually dial', () => {
+  // WebDAV clients send the fixed host in Destination; the upstream compares it with the
+  // Host it was reached as, so leaving it alone answers 404 mid-sync.
+  const engine = makeEngine({ liveSuffix: 'alice.cn11.ugdocker.link' });
+  const route = engine.routes.list()[0];
+  const upstream = engine.upstreamHostFor(route);
+  const fixed = `https://app-5006-${FIXED}/WebDAV/a.xbel`;
+  assert.equal(
+    engine.rewriteDestination(fixed, route, upstream),
+    'https://app-5006-alice.cn11.ugdocker.link/WebDAV/a.xbel',
+  );
+});
+
+test('rewriteDestination keeps the path, query and port intact', () => {
+  const engine = makeEngine({ liveSuffix: 'alice.cn11.ugdocker.link' });
+  const route = engine.routes.list()[0];
+  const upstream = engine.upstreamHostFor(route);
+  const out = engine.rewriteDestination(`https://app-5006-${FIXED}:8443/a/b?c=d`, route, upstream);
+  assert.equal(out, 'https://app-5006-alice.cn11.ugdocker.link:8443/a/b?c=d');
+});
+
+test('rewriteDestination leaves a relative or foreign Destination alone', () => {
+  const engine = makeEngine({ liveSuffix: 'alice.cn11.ugdocker.link' });
+  const route = engine.routes.list()[0];
+  const upstream = engine.upstreamHostFor(route);
+  assert.equal(engine.rewriteDestination('/a/b', route, upstream), '/a/b');
+  assert.equal(
+    engine.rewriteDestination('https://other.example/a', route, upstream),
+    'https://other.example/a',
+  );
+});

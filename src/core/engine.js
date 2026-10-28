@@ -78,6 +78,26 @@ export class Engine {
   }
 
   /**
+   * WebDAV's `Destination` is an absolute URL carrying the host the client knows (the fixed
+   * route name). The upstream validates it against the host it was reached as, so a MOVE
+   * whose Destination still says `cn68` while the request went to `cn11` is answered 404.
+   * Rewrite the authority to what we actually dial, keeping the path untouched.
+   */
+  rewriteDestination(value, route, upstreamHost) {
+    if (!value) return value;
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      return value; // relative Destination — the upstream resolves it against its own host
+    }
+    const fixed = String(route.upstreamHost || route.host).toLowerCase();
+    if (url.hostname.toLowerCase() !== fixed) return value;
+    url.hostname = upstreamHost;
+    return url.toString();
+  }
+
+  /**
    * The hostname to actually dial for [route].
    *
    * `route.host` is the fixed local name (bookmarks), while the gateway's real suffix moves
@@ -223,6 +243,7 @@ export class Engine {
     const realIp = await this.resolveUpstream(upstreamHost);
     const headers = { ...injected.headers };
     headers.host = upstreamHost;
+    if (headers.destination) headers.destination = this.rewriteDestination(headers.destination, route, upstreamHost);
     if (headers.cookie?.includes('ugreen-proxy-token') || headers.authorization) this.stats.authInjected++;
     for (const h of HOP_BY_HOP) delete headers[h];
 
@@ -302,6 +323,7 @@ export class Engine {
       const headers = { ...injected.headers };
       const upstreamHost = this.upstreamHostFor(route);
       headers.host = upstreamHost;
+      if (headers.destination) headers.destination = this.rewriteDestination(headers.destination, route, upstreamHost);
       for (const h of HOP_BY_HOP) delete headers[h];
 
       const realIp = await this.resolveUpstream(upstreamHost);
@@ -354,6 +376,7 @@ export class Engine {
       const headers = { ...injected.headers };
       const upstreamHost = this.upstreamHostFor(route);
       headers.host = upstreamHost;
+      if (headers.destination) headers.destination = this.rewriteDestination(headers.destination, route, upstreamHost);
       for (const h of HOP_BY_HOP) delete headers[h];
 
       const realIp = await this.resolveUpstream(upstreamHost);
