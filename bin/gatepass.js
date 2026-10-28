@@ -20,6 +20,7 @@ const HELP = `GatePass — 免重复登录的网关反向代理
   gatepass status           查看配置路径与端口
   gatepass export [文件]    导出可移植配置（PC / Android / iOS 通用）
   gatepass import <文件>    从可移植配置导入（覆盖账号与路由）
+  gatepass discover         探测 NAS 当前远程访问地址并迁移路由后缀
   gatepass sync-hosts       按当前路由同步系统 hosts（Termux 不支持）
   gatepass print-hosts      打印待写入的 hosts 块
   gatepass trust-ca         打印/尝试导入 CA 证书
@@ -290,6 +291,52 @@ async function cmdImport() {
   log('  如代理正在运行，请重启 gatepass start 使新配置生效。');
 }
 
+async function cmdDiscover() {
+  const { UgosProvider } = await import('../src/core/providers/ugos.js');
+  const { RouteRegistry } = await import('../src/core/routes.js');
+  const configPath = defaultConfigPath();
+  const cfg = loadConfig(configPath);
+  if (!cfg.provider?.authBase) {
+    log('尚未配置 NAS 地址，请先运行 gatepass init');
+    process.exitCode = 1;
+    return;
+  }
+
+  log(`当前地址: ${cfg.provider.authBase}`);
+  const probe = new UgosProvider({ ...cfg.provider, log: () => {} });
+  const found = await probe.discoverAuthBase();
+  if (!found) {
+    log('未找到可用的远程访问地址。请确认 NAS 在线，且账号属于同一绿联账号。');
+    process.exitCode = 1;
+    return;
+  }
+  log(`发现可用地址: ${found}`);
+
+  // Derive the app suffix from the gateway host: yuceyang.cn11.ug.link → yuceyang.cn11.ugdocker.link
+  const hostMatch = found.replace(/^https?:\/\//, '').match(/^(.+?)\.ug\.link\/?$/i);
+  const newSuffix = hostMatch ? `${hostMatch[1]}.ugdocker.link` : '';
+  const oldSuffix = cfg.provider.domainSuffix || '';
+
+  cfg.provider.authBase = found;
+  if (newSuffix) cfg.provider.domainSuffix = newSuffix;
+
+  const registry = new RouteRegistry({ routes: cfg.routes });
+  // Keep `host` (what browsers and bookmarks ask for) and only re-point `upstreamHost`
+  // (what GatePass dials). That way a suffix change never invalidates saved URLs.
+  const changed = oldSuffix && newSuffix ? registry.remapUpstreamSuffix(oldSuffix, newSuffix) : [];
+  cfg.routes = registry.list();
+  saveConfig(cfg, configPath);
+
+  log(`已保存: ${configPath}`);
+  if (changed.length) {
+    log(`已更新 ${changed.length} 条路由的上游地址（本地主机名保持不变）:`);
+    for (const c of changed) log(`  ${c.host}: ${c.from} → ${c.to}`);
+  } else {
+    log('路由上游地址无需变更');
+  }
+  log('浏览器书签/应用配置里的主机名无需修改。如代理正在运行，请重启 gatepass start。');
+}
+
 async function main() {
   // start / sync-hosts / init 需要管理员（443 端口、写系统 hosts）。
   // 未提权时自动以管理员重新拉起，用户只需点一次 UAC「是」。
@@ -316,6 +363,9 @@ async function main() {
       break;
     case 'import':
       await cmdImport();
+      break;
+    case 'discover':
+      await cmdDiscover();
       break;
     case 'sync-hosts':
       await cmdSyncHosts();

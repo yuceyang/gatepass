@@ -75,3 +75,34 @@ test('portable: 解析带 BOM 的 JSON', () => {
 test('portable: 非法 JSON 给出清晰错误', () => {
   assert.throws(() => parsePortable('{not json'), /不是合法 JSON/);
 });
+
+test('routes: remapUpstreamSuffix 只改上游，保留本地主机名', async () => {
+  const { RouteRegistry } = await import('../src/core/routes.js');
+  const rr = new RouteRegistry();
+  rr.add({ host: 'app-5006-yuceyang.cn68.ugdocker.link' });
+  const changed = rr.remapUpstreamSuffix(
+    'yuceyang.cn68.ugdocker.link',
+    'yuceyang.cn11.ugdocker.link',
+  );
+  assert.equal(changed.length, 1);
+  const r = rr.list()[0];
+  assert.equal(r.host, 'app-5006-yuceyang.cn68.ugdocker.link', '本地主机名必须保持不变');
+  assert.equal(r.upstreamHost, 'app-5006-yuceyang.cn11.ugdocker.link');
+  assert.equal(r.upstreamPort, '5006');
+});
+
+test('routes: remapUpstreamSuffix 忽略不匹配的路由', async () => {
+  const { RouteRegistry } = await import('../src/core/routes.js');
+  const rr = new RouteRegistry();
+  rr.add({ host: 'app-8080-other.example.com' });
+  const changed = rr.remapUpstreamSuffix('a.cn68.ugdocker.link', 'a.cn11.ugdocker.link');
+  assert.equal(changed.length, 0);
+  assert.equal(rr.list()[0].upstreamHost, 'app-8080-other.example.com');
+});
+
+test('routes: remapUpstreamSuffix 同后缀时不做改动', async () => {
+  const { RouteRegistry } = await import('../src/core/routes.js');
+  const rr = new RouteRegistry();
+  rr.add({ host: 'app-5006-yuceyang.cn68.ugdocker.link' });
+  assert.deepEqual(rr.remapUpstreamSuffix('same.link', 'same.link'), []);
+});

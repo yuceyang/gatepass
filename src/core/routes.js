@@ -135,6 +135,69 @@ export class RouteRegistry {
     return { added, skipped };
   }
 
+  /**
+   * Rewrites every route to a new gateway suffix.
+   *
+   * UGOS hands out a suffix like `yuceyang.cn68.ugdocker.link` that changes when the device
+   * re-registers, which invalidates every hostname at once. Only the stable tail after the
+   * account label is replaced, so `app-5006-<old>` becomes `app-5006-<new>`.
+   *
+   * @param {string} oldSuffix e.g. yuceyang.cn68.ugdocker.link
+   * @param {string} newSuffix e.g. yuceyang.cn11.ugdocker.link
+   * @returns {Array<{from:string, to:string}>} routes that changed
+   */
+  remapSuffix(oldSuffix, newSuffix) {
+    const from = String(oldSuffix || '').toLowerCase();
+    const to = String(newSuffix || '').toLowerCase();
+    if (!from || !to || from === to) return [];
+    const changed = [];
+    for (const route of this.byId.values()) {
+      const at = route.host.indexOf(from);
+      if (at < 0 || at + from.length !== route.host.length) continue;
+      const nextHost = route.host.slice(0, at) + to;
+      const up = route.upstreamHost || route.host;
+      const upAt = up.indexOf(from);
+      const nextUpstream = upAt >= 0 && upAt + from.length === up.length ? up.slice(0, upAt) + to : route.upstreamHost;
+      const next = this.normalize({ ...route, host: nextHost, upstreamHost: nextUpstream });
+      this.byId.set(route.id, next);
+      changed.push({ from: route.host, to: next.host });
+    }
+    if (changed.length) this.onChange(this.list());
+    return changed;
+  }
+
+  /**
+   * Points every route's upstream at a new gateway suffix while leaving `host` untouched.
+   *
+   * This is what keeps existing bookmarks and app configs working: browsers keep asking for the
+   * hostname they always used (`host`), and GatePass dials the gateway's current name
+   * (`upstreamHost`). Ports are read from the `app-<port>` prefix, so the suffix is irrelevant
+   * to authentication.
+   *
+   * @param {string} oldSuffix e.g. yuceyang.cn68.ugdocker.link
+   * @param {string} newSuffix e.g. yuceyang.cn11.ugdocker.link
+   * @returns {Array<{host:string, from:string, to:string}>} routes whose upstream changed
+   */
+  remapUpstreamSuffix(oldSuffix, newSuffix) {
+    const from = String(oldSuffix || '').toLowerCase();
+    const to = String(newSuffix || '').toLowerCase();
+    if (!from || !to || from === to) return [];
+    const changed = [];
+    for (const route of this.byId.values()) {
+      // The account label is joined with a hyphen (`app-5006-yuceyang.cn68...`), so match on the
+      // raw suffix rather than on `.<suffix>`.
+      const upstream = route.upstreamHost || route.host;
+      const at = upstream.indexOf(from);
+      if (at < 0 || at + from.length !== upstream.length) continue;
+      const nextUpstream = upstream.slice(0, at) + to;
+      const next = this.normalize({ ...route, upstreamHost: nextUpstream });
+      this.byId.set(route.id, next);
+      changed.push({ host: route.host, from: upstream, to: nextUpstream });
+    }
+    if (changed.length) this.onChange(this.list());
+    return changed;
+  }
+
   setEnabled(id, enabled) {
     return this.update(id, { enabled: !!enabled });
   }
